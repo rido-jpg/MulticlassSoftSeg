@@ -117,6 +117,9 @@ unet/out*/
 *.png
 *.csv
 
+# track the data directory inside the src directory
+!/src/data/
+
 # model checkpoints
 *.pth
 *.pckl
