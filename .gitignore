@@ -142,12 +142,11 @@ logs_*
 
 */test_data/*
 
-*test_Kati.py
+
 /tmp/
-*/mokeups/*
-Conventional_Registration_Tutorial.ipynb
+
+1.0-rza-test-make_dataset.ipynb
 airlab
-/TPTBox/registation/mokeups/*
 *.pyc
 test_*.ipynb
 .*DS_Store
@@ -158,6 +157,4 @@ tmp_*.py
 *tmp*.py
 tmp
 tmp/*
-!/TPTBox/tests/sample_mri/*
-!/TPTBox/tests/sample_ct/*
 poetry.lock
