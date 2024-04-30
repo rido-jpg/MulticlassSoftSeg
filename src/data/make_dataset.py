@@ -1,5 +1,4 @@
 import os
-import logging
 import nibabel as nib
 import numpy as np
 import torch
@@ -21,20 +20,22 @@ def create_bids_path_dict(root_dir, prefix=""):
     """
     mri_types = ['t1c', 't1n', 't2f', 't2w', 'seg']
     data_dict = {}
+    root_path = Path(root_dir)
 
     # Iterate through each directory in the root directory
-    for folder in os.listdir(root_dir):
-        folder_path = os.path.join(root_dir, folder)
-        if os.path.isdir(folder_path):
+    for folder_path in root_path.iterdir():
+        if folder_path.is_dir():
             #Initialize a sub-dictionary for each subject
+            folder = folder_path.name
             modified_folder_name = folder.replace(prefix, "") if folder.startswith(prefix) else folder
             subject_files = {mri_type: None for mri_type in mri_types}
 
             # Search for MRI and segmentation files
-            for file in os.listdir(folder_path):
+            for file_path in folder_path.iterdir():
+                file_name = file_path.name
                 for mri_type in mri_types:
-                    if f"{folder}-{mri_type}.nii.gz" in file:
-                        subject_files[mri_type] = os.path.join(folder_path, file)
+                    if f"{folder}-{mri_type}.nii.gz" in file_name:
+                        subject_files[mri_type] = file_path
 
             # Add the dictionary for the current subject to the main dictionary
             data_dict[modified_folder_name] = subject_files
@@ -42,12 +43,13 @@ def create_bids_path_dict(root_dir, prefix=""):
     return data_dict
 
 def create_bids_array_dict(root_dir, prefix=""):
-    bids_array_dict = create_bids_path_dict(root_dir, prefix)
+    bids_path_dict = create_bids_path_dict(root_dir, prefix)
+    bids_array_dict = {}
 
-    for subject, files in bids_array_dict.items():
+    for subject, files in bids_path_dict.items():
         bids_array_dict[subject] = {}
         for contrast, filepath in files.items():
-            if filepath and os.path.exists(filepath):  # Ensure the file exists
+            if filepath and filepath.exists():  # Ensure the file exists
                 if contrast == 'seg':
                     bids_array_dict[subject][contrast] = get_central_slice(load_nifti_as_array(filepath))
                 else: 
@@ -117,21 +119,22 @@ def load_normalized_central_slice_as_array(file_path):
     return central_slice
 
 class BidsDataset(Dataset):
-    def __init__(self, image_paths, mask_paths, transform=None):
+    def __init__(self, root_dir, prefix="", transform=None):
         """
         Parameters:
-        image_paths(): dict of subject number and corresponding file paths to the relevant mri images
-        mask_paths(): dict of subject number and correspondiong file path to relevant segmentation mask
+        root_dir (str): The root directory containing subdirectories for each subject.
+        prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
         transform(): transformation of image data
         """
 
-        self.image_paths = image_paths        
-        self.mask_paths =mask_paths
+        self.root_dir = root_dir   
+        self.prefix = prefix     
         self.transform = transform
 
+        self.bids_dict = create_bids_array_dict(self.root_dir, prefix=self.prefix) 
+        
     def __len__(self):
-        # TODO depending on final input of Dataset return size of dataset
-        return len()
+        return len(self.bids_dict)
     
     def __getitem__(self, idx):
         # TODO properly write a __getitem__ function to return the idxth sample 
