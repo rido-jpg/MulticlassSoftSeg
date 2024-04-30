@@ -119,16 +119,18 @@ def load_normalized_central_slice_as_array(file_path):
     return central_slice
 
 class BidsDataset(Dataset):
-    def __init__(self, root_dir, prefix="", transform=None):
+    def __init__(self, root_dir, prefix="", contrast='t2f', transform=None):
         """
         Parameters:
         root_dir (str): The root directory containing subdirectories for each subject.
         prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
+        contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
         transform(): transformation of image data
         """
 
         self.root_dir = root_dir   
         self.prefix = prefix     
+        self.contrast = contrast
         self.transform = transform
 
         self.bids_dict = create_bids_array_dict(self.root_dir, prefix=self.prefix) 
@@ -137,23 +139,20 @@ class BidsDataset(Dataset):
         return len(self.bids_dict)
     
     def __getitem__(self, idx):
-        # TODO properly write a __getitem__ function to return the idxth sample 
-        image = load_nifti_as_array(self.image_paths[idx])
-        mask = load_nifti_as_array(self.mask_paths[idx])
+        # Convert integer index to subject key
+        subject_key = list(self.bids_dict.keys())[idx]
+        image = self.bids_dict[subject_key][self.contrast]
+        seg = self.bids_dict[subject_key]['seg']
 
-        image_slice = get_central_slice(image)
-        mask_slice = get_central_slice(mask)
-
-        image_slice = normalize(image_slice)
-        mask_slice = np.array(mask_slice, dtype=np.int64)   # Ensure mask is integery type
+        seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
 
         if self.transform:
-            image_slice = self.transform(image_slice)
-            mask_slice = self.transform(mask_slice)
+            image = self.transform(image)
+            seg = self.transform(seg)
 
         # Add a channel dimension and convert to tensors
-        image_slice = torch.from_numpy(image_slice).unsqueeze(0).float()
-        mask_slice = torch.from_numpy(mask_slice).unsqueeze(0).long()
+        image = torch.from_numpy(image).unsqueeze(0).float()
+        seg = torch.from_numpy(seg).unsqueeze(0).long()
         
-        return image_slice, mask_slice
+        return image, seg
     
