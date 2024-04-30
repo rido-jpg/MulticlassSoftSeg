@@ -1,4 +1,5 @@
 import os
+import logging
 import nibabel as nib
 import numpy as np
 import torch
@@ -41,14 +42,13 @@ def create_bids_path_dict(root_dir, prefix=""):
     return data_dict
 
 def create_bids_array_dict(root_dir, prefix=""):
-    bids_dict = create_bids_path_dict(root_dir, prefix)
-    bids_array_dict = bids_dict
+    bids_array_dict = create_bids_path_dict(root_dir, prefix)
 
-    for subject, files in bids_dict.items():
+    for subject, files in bids_array_dict.items():
         bids_array_dict[subject] = {}
         for contrast, filepath in files.items():
             if filepath and os.path.exists(filepath):  # Ensure the file exists
-                if contrast == "seg":
+                if contrast == 'seg':
                     bids_array_dict[subject][contrast] = get_central_slice(load_nifti_as_array(filepath))
                 else: 
                     bids_array_dict[subject][contrast] = load_normalized_central_slice_as_array(filepath)
@@ -60,7 +60,7 @@ def create_bids_array_dict(root_dir, prefix=""):
 def load_nifti_as_array(file_path):
     #Load nifti file and convert to np array
     nifti_image = nib.load(file_path)
-    nifti_np_array = np.array(nifti_image.get_fdata(), dtype=np.float32)
+    nifti_np_array = np.array(nifti_image.get_fdata(), dtype=np.float64)
     return nifti_np_array
 
 def get_central_slice(nifti_np_array, axis=2):
@@ -89,21 +89,32 @@ def get_central_slice(nifti_np_array, axis=2):
 
     return slice_data
 
+def normalize(nifti_array):
+    # Z-Score standardization
+    # Mask to exclude zeros
+    mask = nifti_array != 0
+    masked_array = nifti_array[mask]
+    
+    if masked_array.size == 0:
+        raise ValueError("No non-zero elements found in the array for normalization.")
 
-# def normalize(slice_array):
-#     #Min-Max Normalization
-#     min_value = np.min(slice_array)
-#     max_value = np.max(slice_array)
-#     delta = max_value - min_value
-#     normalized_slice = (slice_array - min_value) / delta if delta > 0 else slice_array
-#     return normalized_slice
+    mean = masked_array.mean()
+    std = masked_array.std()
+    
+    # Only apply normalization to non-zero elements
+    if std > 0:
+        normalized_array = nifti_array.copy()  # Create a copy to retain the original zero values
+        normalized_array[mask] = (masked_array - mean) / std
+    else:
+        raise ValueError("Standard deviation of the masked elements is zero, normalization cannot be performed.")
+    
+    return normalized_array
 
 def load_normalized_central_slice_as_array(file_path):
-     nifti_array = load_nifti_as_array(file_path)
-     central_slice = get_central_slice(nifti_array)
-#     normalized_slice = normalize(central_slice)        #Reactivate normalization by deleting comma
-#     return normalized_slice
-     return central_slice
+    nifti_array = load_nifti_as_array(file_path)
+    normalized_array = normalize(nifti_array)
+    central_slice = get_central_slice(normalized_array)
+    return central_slice
 
 class BidsDataset(Dataset):
     def __init__(self, image_paths, mask_paths, transform=None):
