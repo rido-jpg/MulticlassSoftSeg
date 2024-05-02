@@ -125,12 +125,13 @@ def load_normalized_central_slice_as_array(file_path):
     return central_slice
 
 class BidsDataset(Dataset):
-    def __init__(self, root_dir, prefix="", contrast='t2f', transform=None):
+    def __init__(self, root_dir, prefix="", contrast='t2f', binary=True, transform=None):
         """
         Parameters:
         root_dir (str): The root directory containing subdirectories for each subject.
         prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
         contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
+        binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
         transform(): transformation of image data
         """
 
@@ -138,25 +139,29 @@ class BidsDataset(Dataset):
         self.prefix = prefix     
         self.contrast = contrast
         self.transform = transform
+        self.binary = binary
 
-        self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix) 
+        self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix)
         
     def __len__(self):
         return len(self.bids_list)
     
     def __getitem__(self, idx):
-        image = self.bids_list[idx][self.contrast]
+        img = self.bids_list[idx][self.contrast]
         seg = self.bids_list[idx]['seg']
 
         seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
 
+        if self.binary:
+            # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
+            seg[seg > 0] = 1
+
         if self.transform:
-            image = self.transform(image)
-            seg = self.transform(seg)
+            img, seg = self.transform(img, seg)
 
         # Add a channel dimension and convert to tensors
-        image = torch.from_numpy(image).unsqueeze(0).float()
+        img = torch.from_numpy(img).unsqueeze(0).float()
         seg = torch.from_numpy(seg).unsqueeze(0).long()
         
-        return image, seg
+        return img, seg
     
