@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset
 from pathlib import Path
 
-def create_bids_path_dict(root_dir, prefix=""):
+def create_bids_path_list_of_dicts(root_dir, prefix=""):
     """
     Scan the specified directory for MRI and segmentation files organized in a BIDS-like structure.
 
@@ -19,7 +19,7 @@ def create_bids_path_dict(root_dir, prefix=""):
           dictionary with keys for each MRI type and the segmentation mask, containing their file paths.
     """
     mri_types = ['t1c', 't1n', 't2f', 't2w', 'seg']
-    data_dict = {}
+    list_of_path_dicts = []
     root_path = Path(root_dir)
 
     # Iterate through each directory in the root directory
@@ -35,29 +35,35 @@ def create_bids_path_dict(root_dir, prefix=""):
                 file_name = file_path.name
                 for mri_type in mri_types:
                     if f"{folder}-{mri_type}.nii.gz" in file_name:
-                        subject_files[mri_type] = file_path
+                        subject_files[mri_type] = file_path.absolute()
 
-            # Add the dictionary for the current subject to the main dictionary
-            data_dict[modified_folder_name] = subject_files
+            # Add the dictionary for the current subject to the main list
+            subject_dict = {'subject': modified_folder_name, **subject_files}
+            list_of_path_dicts.append(subject_dict)
 
-    return data_dict
+    return list_of_path_dicts
 
-def create_bids_array_dict(root_dir, prefix=""):
-    bids_path_dict = create_bids_path_dict(root_dir, prefix)
-    bids_array_dict = {}
+def create_bids_array_list_of_dicts(root_dir, prefix=""):
+    list_of_path_dicts = create_bids_path_list_of_dicts(root_dir, prefix)
+    list_of_array_dicts = []
 
-    for subject, files in bids_path_dict.items():
-        bids_array_dict[subject] = {}
-        for contrast, filepath in files.items():
-            if filepath and filepath.exists():  # Ensure the file exists
+    for subject_dict in list_of_path_dicts:
+        subject = subject_dict['subject']
+        array_dict = {'subject': subject}
+        for contrast in ['t1c', 't1n', 't2f', 't2w', 'seg']: # List MRI types
+            filepath = subject_dict.get(contrast)
+            if filepath and Path(filepath).exists():  # Ensure the file exists
                 if contrast == 'seg':
-                    bids_array_dict[subject][contrast] = get_central_slice(load_nifti_as_array(filepath))
+                    array_dict[contrast] = get_central_slice(load_nifti_as_array(filepath))
                 else: 
-                    bids_array_dict[subject][contrast] = load_normalized_central_slice_as_array(filepath)
+                    array_dict[contrast] = load_normalized_central_slice_as_array(filepath)
             else:
-                bids_array_dict[subject][contrast] = None  # Handle missing or inaccessible files gracefully2
+                array_dict[contrast] = None  # Handle missing or inaccessible files gracefully
 
-    return bids_array_dict
+        # Add the dictionary for the current subject to the main list
+        list_of_array_dicts.append(array_dict)
+
+    return list_of_array_dicts
 
 def load_nifti_as_array(file_path):
     #Load nifti file and convert to np array
