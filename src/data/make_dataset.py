@@ -139,16 +139,14 @@ class BidsDataset(Dataset):
         self.contrast = contrast
         self.transform = transform
 
-        self.bids_dict = create_bids_array_dict(self.root_dir, prefix=self.prefix) 
+        self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix) 
         
     def __len__(self):
-        return len(self.bids_dict)
+        return len(self.bids_list)
     
     def __getitem__(self, idx):
-        # Convert integer index to subject key
-        subject_key = list(self.bids_dict.keys())[idx]
-        image = self.bids_dict[subject_key][self.contrast]
-        seg = self.bids_dict[subject_key]['seg']
+        image = self.bids_list[idx][self.contrast]
+        seg = self.bids_list[idx]['seg']
 
         seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
 
