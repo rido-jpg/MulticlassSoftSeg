@@ -152,8 +152,8 @@ class BidsDataset(Dataset):
 
         seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
 
+        # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
         if self.binary:
-            # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
             seg[seg > 0] = 1
 
         if self.transform:
