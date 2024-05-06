@@ -11,15 +11,16 @@ import torch.optim as optim
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Set hyperparameters
-batch_size = 4
+batch_size = 2
 learning_rate = 0.001
 num_epochs = 10
 
 # Create dataset and dataloader
-dataset = BidsDataset()
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+dataset_root = "/media/DATA/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData"
+train_dataset = BidsDataset(dataset_root, contrast='t2f', binary=True, resize=(256, 256))
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
-model = UNet().to(device)
+model = UNet(in_channels=1, out_channels=2).to(device)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -27,17 +28,22 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 # Initialize variables
 epoch_loss = 0.0
-total = 0
-correct = 0
+total_pixels = 0
+correct_pixels = 0
 train_losses = []
 train_accs = []
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 # Training loop
 for epoch in range(num_epochs):
-    for images, labels in dataloader:
+    epoch_loss = 0.0
+    total_pixels = 0
+    correct_pixels = 0
+    for images, labels in train_loader:
+        # Move images and labels to device
         images = images.to(device)
         labels = labels.to(device)
+        labels = labels.squeeze(1)  # Squeeze the channel dimension of labels
 
         # Forward pass
         outputs = model(images)
@@ -53,16 +59,18 @@ for epoch in range(num_epochs):
 
         # Calculate training accuracy
         _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
+        total_pixels += images.numel()                          # Number of pixels in the batch 
+        correct_pixels += (predicted == labels).sum().item()    # Number of correct pixels in the batch
+
 
     # Calculate epoch loss and accuracy
-    epoch_loss /= len(dataloader)
-    train_acc = correct / total
+    epoch_loss /= (len(train_loader) * batch_size)          # Average loss over all batches in one epoch
+    train_acc = (correct_pixels / total_pixels)             # Accuracy over all pixels in one epoch
+
 
     # Append epoch loss and accuracy to lists
-    train_losses.append(epoch_loss)
-    train_accs.append(train_acc)
+    train_losses.append(epoch_loss)                 # Not sure if this is correct
+    train_accs.append(train_acc)                    # Not sure if this is correct
 
     # Print epoch loss and accuracy
     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss}, Accuracy: {train_acc}")
