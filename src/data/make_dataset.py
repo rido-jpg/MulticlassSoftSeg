@@ -2,8 +2,57 @@ import os
 import nibabel as nib
 import numpy as np
 import torch
+import torch.nn.functional as F
+from torchvision import transforms
 from torch.utils.data import Dataset
 from pathlib import Path
+
+class BidsDataset(Dataset):
+    def __init__(self, root_dir, prefix="", contrast='t2f', binary=True, transform=None, resize=(256, 256)):
+        """
+        Parameters:
+        root_dir (str): The root directory containing subdirectories for each subject.
+        prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
+        contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
+        binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
+        transform(): transformation of image data
+        """
+
+        self.root_dir = root_dir   
+        self.prefix = prefix     
+        self.contrast = contrast
+        self.transform = transform
+        self.binary = binary
+        self.resize = resize
+
+        self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix)
+        
+    def __len__(self):
+        return len(self.bids_list)
+    
+    def __getitem__(self, idx):
+        img = self.bids_list[idx][self.contrast]
+        seg = self.bids_list[idx]['seg']
+
+        seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
+
+        # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
+        if self.binary:
+            seg[seg > 0] = 1
+
+        # Convert numpy arrays to PyTorch tensors and add a channel dimension
+        img = torch.from_numpy(img).unsqueeze(0).float()
+        seg = torch.from_numpy(seg).unsqueeze(0).long()
+
+        if self.resize:
+            # Use torch.nn.functional.interpolate to resize the image and segmentation mask
+            img = F.interpolate(img.unsqueeze(0), size=self.resize, mode='bilinear', align_corners=False).squeeze(0)
+            seg = F.interpolate(seg.unsqueeze(0).float(), size=self.resize, mode='nearest').squeeze(0).long()
+        
+        if self.transform:
+            img, seg = self.transform(img, seg)
+        
+        return img, seg
 
 def create_bids_path_list_of_dicts(root_dir, prefix=""):
     """
@@ -122,46 +171,4 @@ def load_normalized_central_slice_as_array(file_path):
     nifti_array = load_nifti_as_array(file_path)
     normalized_array = normalize(nifti_array)
     central_slice = get_central_slice(normalized_array)
-    return central_slice
-
-class BidsDataset(Dataset):
-    def __init__(self, root_dir, prefix="", contrast='t2f', binary=True, transform=None):
-        """
-        Parameters:
-        root_dir (str): The root directory containing subdirectories for each subject.
-        prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
-        contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
-        binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
-        transform(): transformation of image data
-        """
-
-        self.root_dir = root_dir   
-        self.prefix = prefix     
-        self.contrast = contrast
-        self.transform = transform
-        self.binary = binary
-
-        self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix)
-        
-    def __len__(self):
-        return len(self.bids_list)
-    
-    def __getitem__(self, idx):
-        img = self.bids_list[idx][self.contrast]
-        seg = self.bids_list[idx]['seg']
-
-        seg = np.array(seg, dtype=np.int64)   # Ensure mask is integer type
-
-        # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
-        if self.binary:
-            seg[seg > 0] = 1
-
-        if self.transform:
-            img, seg = self.transform(img, seg)
-
-        # Add a channel dimension and convert to tensors
-        img = torch.from_numpy(img).unsqueeze(0).float()
-        seg = torch.from_numpy(seg).unsqueeze(0).long()
-        
-        return img, seg
-    
+    return central_slice   
