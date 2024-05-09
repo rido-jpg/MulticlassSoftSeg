@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from pathlib import Path
 
 class BidsDataset(Dataset):
-    def __init__(self, root_dir, prefix="", contrast='t2f', binary=True, transform=None, resize=(256, 256)):
+    def __init__(self, root_dir, prefix="", contrast='t2f', binary=True, transform=None, padding=(256, 256)):
         """
         Parameters:
         root_dir (str): The root directory containing subdirectories for each subject.
@@ -23,7 +23,7 @@ class BidsDataset(Dataset):
         self.contrast = contrast
         self.transform = transform
         self.binary = binary
-        self.resize = resize
+        self.padding = padding
 
         self.bids_list = create_bids_array_list_of_dicts(self.root_dir, prefix=self.prefix)
         
@@ -44,10 +44,16 @@ class BidsDataset(Dataset):
         img = torch.from_numpy(img).unsqueeze(0).float()
         seg = torch.from_numpy(seg).unsqueeze(0).long()
 
-        if self.resize:
-            # Use torch.nn.functional.interpolate to resize the image and segmentation mask -> change to paddening
-            img = F.interpolate(img.unsqueeze(0), size=self.resize, mode='bilinear', align_corners=False).squeeze(0)
-            seg = F.interpolate(seg.unsqueeze(0).float(), size=self.resize, mode='nearest').squeeze(0).long()
+        if self.padding:
+            # Calculate the padding required to achieve the desired size
+            h, w = img.shape[-2:]
+            target_h, target_w = self.padding
+            pad_h = max(0, target_h - h)
+            pad_w = max(0, target_w - w)
+            
+            # Apply padding to the image and segmentation mask
+            img = F.pad(img, (0, pad_w, 0, pad_h))
+            seg = F.pad(seg, (0, pad_w, 0, pad_h))
         
         if self.transform:
             img, seg = self.transform(img, seg)
