@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from data.make_dataset import BidsDataset
+from data.bids_dataset import BidsDataset
 from models.unet_copilot import UNet
 import datetime
 
