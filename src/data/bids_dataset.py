@@ -45,7 +45,7 @@ class BidsDataset(Dataset):
         seg = torch.from_numpy(seg).unsqueeze(0).long()
 
         if self.resize:
-            # Use torch.nn.functional.interpolate to resize the image and segmentation mask
+            # Use torch.nn.functional.interpolate to resize the image and segmentation mask -> change to paddening
             img = F.interpolate(img.unsqueeze(0), size=self.resize, mode='bilinear', align_corners=False).squeeze(0)
             seg = F.interpolate(seg.unsqueeze(0).float(), size=self.resize, mode='nearest').squeeze(0).long()
         
