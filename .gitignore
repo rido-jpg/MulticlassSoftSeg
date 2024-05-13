@@ -120,6 +120,9 @@ unet/out*/
 # track the data directory inside the src directory
 !/src/data/
 
+# ignore external code
+external
+
 # model checkpoints
 *.pth
 *.pckl
