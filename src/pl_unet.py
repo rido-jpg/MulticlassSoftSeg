@@ -53,10 +53,10 @@ class BidsDataModule(pl.LightningDataModule):
         self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], )
 
     def train_dataloader(self) -> torch.Any:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
     
     def val_dataloader(self) -> torch.Any:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
     
 if __name__ == '__main__':
     # Set device automatically handled by PyTorch Lightning
@@ -65,5 +65,5 @@ if __name__ == '__main__':
     data_module = BidsDataModule(data_dir, batch_size=2)
 
     # Trainer handles training loop
-    trainer = pl.Trainer(max_epochs=10, default_root_dir='/media/DATA/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/')
+    trainer = pl.Trainer(max_epochs=5, default_root_dir='/media/DATA/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', log_every_n_steps=1, accelerator='auto')
     trainer.fit(model, datamodule=data_module)
