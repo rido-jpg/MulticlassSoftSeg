@@ -6,8 +6,8 @@ import torch.nn.functional as F
 import random
 import csv
 import sys
-import TPTBox
 
+from TPTBox import NII
 from torchvision import transforms
 from torch.utils.data import Dataset
 from pathlib import Path
@@ -136,7 +136,7 @@ def create_bids_path_list_of_dicts(root_dir:str, prefix:str="", suffix:str="nii.
 
     return list_of_path_dicts
 
-def create_bids_array_list_of_dicts(root_dir:str, prefix:str= "") -> list:
+def create_bids_array_list_of_dicts(root_dir:str, prefix:str= "") -> list: #  not needed anymore ?
     list_of_path_dicts = create_bids_path_list_of_dicts(root_dir, prefix)
     list_of_array_dicts = []
 
@@ -160,8 +160,8 @@ def create_bids_array_list_of_dicts(root_dir:str, prefix:str= "") -> list:
 
 def load_nifti_as_array(file_path: str):
     #Load nifti file and convert to np array
-    nifti_image = nib.load(file_path)
-    nifti_np_array = np.array(nifti_image.get_fdata(), dtype=np.float64)
+    nifti_image = NII.load(file_path)
+    nifti_np_array = nifti_image.get_array()
     return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
 
 def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
@@ -217,7 +217,16 @@ def load_normalized_central_slice_as_array(file_path: str)->np.ndarray:
     central_slice = get_central_slice(normalized_array)
     return central_slice   
 
-def split_data_and_save_to_csv(data: list, split_percentage: float, directory: str, mode: str = "train_val", seed: int = 42): # necessary?
+def split_data_and_save_to_csv(data: list, split_percentage: float, directory: str, train_val:bool = True, seed: int = 42):
+    """
+    Split the data into sets for either training and testing or training and validation and save the "subject" values to CSV files.
+    Parameters:
+    data (list): The list of data dictionaries to be split.
+    split_percentage (float): The percentage of data to be used for training.
+    directory (str): The directory in which to save the CSV files.
+    train_val (bool): If True, split the data into training and validation sets. If False, split the data into training and testing sets.
+    seed (int): The seed for the random number generator.
+    """
     # Set the seed for reproducibility
     random.seed(seed)
 
@@ -227,17 +236,32 @@ def split_data_and_save_to_csv(data: list, split_percentage: float, directory: s
     # Calculate the index at which to split the data
     split_index = int(len(data) * split_percentage)
 
-    
+    # Check if the data should be split into training and validation or training and testing sets
+    if train_val:
+        _split_and_save(True, data, split_index, directory)
 
-    # Split the data into training and validation sets
-    train_data = [{'split': 'train', 'subject': d.get('subject', '')} for d in data[:split_index]]
-    val_data = [{'split': 'val', 'subject': d.get('subject', '')} for d in data[split_index:]]
+    else:
+        _split_and_save(False, data, split_index, directory)
 
-    # Create the directory if it doesn't exist
-    Path(directory).mkdir(parents=True, exist_ok=True)
+def _split_and_save(val_split: bool, data: list, split_index: int, directory: str):
+        """"
+        Parameters:
+        val_split (bool): If True, split the data into training and validation sets. If False, split the data into training and testing sets.
+        """
+        if val_split:
+            rest = 'val'
+        else:
+            rest = 'test'
 
-    # Save the "subject" values from the training and validation sets to CSV files
-    _save_to_csv(train_data + val_data, Path(directory) / 'train_val_split.csv')
+        # Split the data into training and validation/test sets
+        train_data = [{'split': 'train', 'subject': d.get('subject', '')} for d in data[:split_index]]
+        rest_data = [{'split': rest, 'subject': d.get('subject', '')} for d in data[split_index:]]
+
+        # Create the directory if it doesn't exist
+        Path(directory).mkdir(parents=True, exist_ok=True)
+
+        # Save the "subject" values from the training and validation/test sets to CSV files
+        _save_to_csv(train_data + rest_data, Path(directory) / f"train_{rest}_split.csv")
 
 def _save_to_csv(data: list, filename: Path):
     with filename.open('w', newline='') as csvfile:
