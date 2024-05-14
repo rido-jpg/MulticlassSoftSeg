@@ -18,23 +18,24 @@ class LitUNet2DModule(pl.LightningModule):
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
-        images, segs = batch
-        segs = segs.squeeze(1)
-        outputs = self.model(images)
-        loss = self.criterion(outputs, segs)
+        loss = self._shared_step(batch, batch_idx)
         self.log('train_loss', loss)
         return loss
     
     def validation_step(self, batch, batch_idx):
-        images, segs = batch
-        segs = segs.squeeze(1)
-        outputs = self.model(images)
-        loss = self.criterion(outputs, segs)
+        loss = self._shared_step(batch, batch_idx)
         self.log('val_loss', loss)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
+    
+    def _shared_step(self, batch, batch_idx):
+        images, segs = batch
+        segs = segs.squeeze(1)
+        outputs = self.model(images)
+        loss = self.criterion(outputs, segs)
+        return loss
 
 class BidsDataModule(pl.LightningDataModule):
     def __init__(self, data_dir, batch_size=2,  padding=(256, 256), contrast='t2f', binary=True):
