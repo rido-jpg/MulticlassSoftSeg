@@ -1,5 +1,7 @@
 import torch
 import lightning.pytorch as pl
+import torchmetrics.functional as mF
+from torch.optim import lr_scheduler
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, random_split
@@ -7,19 +9,42 @@ from data.bids_dataset import BidsDataset
 from models.unet_copilot import UNet
 
 class LitUNet2DModule(pl.LightningModule):
-
     def __init__(self, in_channels, out_channels, learning_rate=0.001):
         super().__init__()
+        self.save_hyperparameters()
+
         self.model = UNet(in_channels, out_channels)
         self.learning_rate = learning_rate
         self.criterion = nn.CrossEntropyLoss()
+
+    def on_fit_start(self):
+        tb = self.logger.experiment  # noqa
+        #
+        layout_loss_train = [r"loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
+        layout_loss_val = [r"loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
+        layout_loss_merge = [r"loss/train_loss", "loss/val_loss"]
+        layout_diceFG_merge = [r"diceFG/train_diceFG", "diceFG/val_diceFG"]
+
+        layout = {
+            "loss_split": {
+                "loss_train": ["Multiline", layout_loss_train],
+                "loss_val": ["Multiline", layout_loss_val],
+            },
+            "loss_merge": {
+                "loss": ["Multiline", layout_loss_merge],
+            },
+            "diceFG_merge": {
+                "diceFG": ["Multiline", layout_diceFG_merge],
+            },
+        }
+        tb.add_custom_scalars(layout)        
 
     def forward(self, x):
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
         loss = self._shared_step(batch, batch_idx)
-        self.log('train_loss', loss)
+        self.log('loss/train_loss', loss)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -38,17 +63,20 @@ class LitUNet2DModule(pl.LightningModule):
         return loss
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=2,  padding=(256, 256), contrast='t2f', binary=True):
+    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256), batch_size:int=2,):
         super().__init__()
         self.data_dir = data_dir
-        self.batch_size = batch_size
-        self.padding = padding
         self.contrast = contrast
+        self.format = format
+        self.do2D = do2D
         self.binary = binary
+        self.transform = transform
+        self.padding = padding
+        self.batch_size = batch_size
 
     def setup(self, stage: str = None) -> None:
         # Assign train/val datasets for use in dataloaders
-        full_dataset = BidsDataset(self.data_dir, contrast=self.contrast, binary=self.binary, padding=self.padding)
+        full_dataset = BidsDataset(self.data_dir, contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.transform,padding=self.padding)
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], )
@@ -61,10 +89,10 @@ class BidsDataModule(pl.LightningDataModule):
     
 if __name__ == '__main__':
     # Set device automatically handled by PyTorch Lightning
-    data_dir = "/media/DATA/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData"
+    data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData'
     model = LitUNet2DModule(in_channels=1, out_channels=2)
     data_module = BidsDataModule(data_dir, batch_size=2)
 
     # Trainer handles training loop
-    trainer = pl.Trainer(max_epochs=5, default_root_dir='/media/DATA/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', log_every_n_steps=1, accelerator='auto')
+    trainer = pl.Trainer(max_epochs=5, default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', log_every_n_steps=1, accelerator='auto')
     trainer.fit(model, datamodule=data_module)
