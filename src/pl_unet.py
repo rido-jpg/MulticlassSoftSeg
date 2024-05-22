@@ -11,15 +11,16 @@ from data.bids_dataset import BidsDataset
 from models.unet_copilot import UNet
 
 class LitUNet2DModule(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, learning_rate=0.001, l2_reg_w=0.001):
-        super().__init__()
+    def __init__(self, in_channels, out_channels, start_lr=0.0001, lr_end_factor=1, n_classes:int=2, l2_reg_w=0.001):
+        super(LitUNet2DModule, self).__init__()
         self.save_hyperparameters()
 
         self.model = UNet(in_channels, out_channels)
-        self.learning_rate = learning_rate
+        self.start_lr = start_lr
+        self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
 
-        self.n_classes = 2
+        self.n_classes = n_classes
 
         self.train_step_outputs = {}
         self.val_step_outputs = {}
@@ -106,7 +107,6 @@ class LitUNet2DModule(pl.LightningModule):
 
             self.log("dice/val_dice", metrics["dice"], on_epoch=True)
             self.log("diceFG/val_diceFG", metrics["diceFG"], on_epoch=True)
-            #self.log("dice_p_cls/val_dice_p_cls", metrics["dice_p_cls"], on_epoch=True)
             self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
             for i, score in enumerate(metrics["dice_p_cls"]):
@@ -114,8 +114,13 @@ class LitUNet2DModule(pl.LightningModule):
         self.val_step_outputs.clear()
 
     def configure_optimizers(self): # next step to improve this
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        return optimizer
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
+        scheduler = lr_scheduler.LinearLR(
+            optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
+        )
+        if scheduler is not None:
+            return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        return {"optimizer": optimizer}
         
     def loss(self, outputs, masks):
         ce_loss = self.CEL(outputs, masks)
@@ -164,14 +169,12 @@ class LitUNet2DModule(pl.LightningModule):
     def _shared_cat_metrics(self, outputs):
         results = {}
         for m, v in outputs.items():
-            # v = np.asarray(v)
-            # print(m, v.shape)
             stacked = torch.stack(v)
             results[m] = torch.mean(stacked) if m != "dice_p_cls" else torch.mean(stacked, dim=0)
         return results     
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256), batch_size:int=2,):
+    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256), batch_size:int=2):
         super().__init__()
         self.data_dir = data_dir
         self.contrast = contrast
@@ -187,47 +190,11 @@ class BidsDataModule(pl.LightningDataModule):
         full_dataset = BidsDataset(self.data_dir, contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.transform,padding=self.padding)
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
-        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], )
+        generator = torch.Generator().manual_seed(42)   # Set seed for reproducibility
+        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], generator)
 
     def train_dataloader(self) -> torch.Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
     
     def val_dataloader(self) -> torch.Any:
         return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
-    
-if __name__ == '__main__':
-    # Set device automatically handled by PyTorch Lightning
-    data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData'
-    model = LitUNet2DModule(in_channels=1, out_channels=2)
-    data_module = BidsDataModule(data_dir, batch_size=2)
-
-    #Directory for logs
-    filepath_logs = os.getcwd() + "/lightning_logs/"
-
-    # Determine next version number
-    model_name = model.__class__.__name__
-    log_dir = os.path.join(filepath_logs, model_name)
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    version = len(os.listdir(log_dir))
-
-
-    # Initalize logger
-    logger = TensorBoardLogger(
-        save_dir=str(filepath_logs),
-        name=model_name,
-        version=str(f"{model_name}_v{version}_lr{model.learning_rate}"), # naming is a bit wack, improve later
-        default_hp_metric=False,
-    )
-
-    # Trainer handles training loop
-    trainer = pl.Trainer(
-        max_epochs=20, 
-        default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', 
-        log_every_n_steps=1, 
-        accelerator='auto',
-        logger=logger
-    )
-    
-    # Train the model
-    trainer.fit(model, datamodule=data_module)
