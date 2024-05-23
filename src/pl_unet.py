@@ -4,14 +4,10 @@ import lightning.pytorch as pl
 import torchmetrics.functional as mF
 from torch.optim import lr_scheduler
 from torch import nn
-from torch.nn import functional as F
-from lightning.pytorch.loggers import TensorBoardLogger
-from torch.utils.data import DataLoader, random_split
-from data.bids_dataset import BidsDataset
 from models.unet_copilot import UNet
 
 class LitUNet2DModule(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, start_lr=0.0001, lr_end_factor=1, n_classes:int=2, l2_reg_w=0.001):
+    def __init__(self, in_channels:int, out_channels:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=2, l2_reg_w=0.001):
         super(LitUNet2DModule, self).__init__()
         self.save_hyperparameters()
 
@@ -115,9 +111,13 @@ class LitUNet2DModule(pl.LightningModule):
 
     def configure_optimizers(self): # next step to improve this
         optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
-        scheduler = lr_scheduler.LinearLR(
-            optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
+        # scheduler = lr_scheduler.LinearLR(
+        #     optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
+        # )
+        scheduler = lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=20, eta_min=0.00001
         )
+        #scheduler = None
         if scheduler is not None:
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         return {"optimizer": optimizer}
@@ -172,29 +172,3 @@ class LitUNet2DModule(pl.LightningModule):
             stacked = torch.stack(v)
             results[m] = torch.mean(stacked) if m != "dice_p_cls" else torch.mean(stacked, dim=0)
         return results     
-
-class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256), batch_size:int=2):
-        super().__init__()
-        self.data_dir = data_dir
-        self.contrast = contrast
-        self.format = format
-        self.do2D = do2D
-        self.binary = binary
-        self.transform = transform
-        self.padding = padding
-        self.batch_size = batch_size
-
-    def setup(self, stage: str = None) -> None:
-        # Assign train/val datasets for use in dataloaders
-        full_dataset = BidsDataset(self.data_dir, contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.transform,padding=self.padding)
-        train_size = int(0.8 * len(full_dataset))
-        val_size = len(full_dataset) - train_size
-        generator = torch.Generator().manual_seed(42)   # Set seed for reproducibility
-        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], generator)
-
-    def train_dataloader(self) -> torch.Any:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
-    
-    def val_dataloader(self) -> torch.Any:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)

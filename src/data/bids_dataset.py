@@ -1,15 +1,17 @@
 import os
-import nibabel as nib
-import numpy as np
-import torch
-import torch.nn.functional as F
+#import nibabel as nib
 import random
 import csv
 import sys
+import torch
+import torch.nn.functional as F
+import numpy as np
+import lightning.pytorch as pl
+
 
 from TPTBox import NII
 from torchvision import transforms
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
 
 file = Path(__file__).resolve()
@@ -21,6 +23,32 @@ from external.fastnumpyio.fastnumpyio import save, load, pack, unpack
 
 # Array of all MRI contrasts and the segmentation mask  
 contrasts = ['t1c', 't1n', 't2f', 't2w', 'seg']
+
+class BidsDataModule(pl.LightningDataModule):
+    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256), batch_size:int=2):
+        super().__init__()
+        self.data_dir = data_dir
+        self.contrast = contrast
+        self.format = format
+        self.do2D = do2D
+        self.binary = binary
+        self.transform = transform
+        self.padding = padding
+        self.batch_size = batch_size
+
+    def setup(self, stage: str = None) -> None:
+        # Assign train/val datasets for use in dataloaders
+        full_dataset = BidsDataset(self.data_dir, contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.transform,padding=self.padding)
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        generator = torch.Generator().manual_seed(42)   # Set seed for reproducibility
+        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], generator)
+
+    def train_dataloader(self) -> torch.Any:
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
+    
+    def val_dataloader(self) -> torch.Any:
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
 
 class BidsDataset(Dataset):
     def __init__(self, root_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding=(256, 256)):
