@@ -6,21 +6,24 @@ from lightning.pytorch.loggers import TensorBoardLogger
 
 if __name__ == '__main__':
     # Set device automatically handled by PyTorch Lightning
-    data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData'
+    data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
+    in_channels = 1 # MRI scans are grayscale -> 1 channel
+    n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
+    out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
+
+    if n_classes == 2:
+        binary = True
+    else:
+        binary = False
 
     # Hyperparameters
-    n_classes = 4
-    out_channels = n_classes
-    binary = False
-    start_lr = 0.0001
-    lr_end_factor = 0.1
-    l2_reg_w = 0.001
-    batch_size = 32
-    max_epochs = 10
+    start_lr = 0.0001   # starting learning rate
+    lr_end_factor = 0.1 # factor to reduce learning rate to at the end of training
+    l2_reg_w = 0.001    # weight for L2 regularization
+    dsc_loss_w = 1.0    # weight for Dice loss
+    batch_size = 4
+    max_epochs = 30    # number of epochs to train
 
-    #For Binary
-    # n_classes = 2     # out_channels = n_classes
-    # binary = True
 
     model = LitUNet2DModule(
         in_channels=1,
@@ -34,9 +37,10 @@ if __name__ == '__main__':
         data_dir = data_dir,
         binary = binary,
         batch_size = batch_size,
+        transform = None,
     )
 
-    suffix = str(f"_batch_size_{batch_size}_binary_{binary}_Cosine_Annealing_n_epochs_{max_epochs}")
+    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_torchmetrics_dice_loss")
 
     #Directory for logs
     filepath_logs = os.getcwd() + "/lightning_logs/"
@@ -59,11 +63,13 @@ if __name__ == '__main__':
 
     # Trainer handles training loop
     trainer = pl.Trainer(
+        fast_dev_run=True,
         max_epochs=max_epochs, 
         default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', 
         log_every_n_steps=1, 
         accelerator='auto',
-        logger=logger
+        logger=logger,
+        #profiler="simple"
     )
     
     # Train the model
