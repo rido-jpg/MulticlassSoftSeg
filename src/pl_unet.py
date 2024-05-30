@@ -1,13 +1,21 @@
 import os
 import torch
+import numpy as np
 import lightning.pytorch as pl
+import torch.nn.functional as F
 import torchmetrics.functional as mF
 from torch.optim import lr_scheduler
 from torch import nn
 from models.unet_copilot import UNet
+#from medpy.metric.binary import assd
+from monai.losses import DiceLoss
+from monai.metrics import DiceMetric, compute_average_surface_distance
+#import medpy
+#from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
+
 
 class LitUNet2DModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=2, l2_reg_w=0.001):
+    def __init__(self, in_channels:int, out_channels:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
         super(LitUNet2DModule, self).__init__()
         self.save_hyperparameters()
 
@@ -15,24 +23,40 @@ class LitUNet2DModule(pl.LightningModule):
         self.start_lr = start_lr
         self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
+        self.dsc_loss_w = dsc_loss_w
 
         self.n_classes = n_classes
+        self.transforms = None
 
         self.train_step_outputs = {}
         self.val_step_outputs = {}
 
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
+        #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=True, softmax=True, batch=True) # Monai Dice Loss
+        #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
 
+    # # Operates on a mini-batch before it is transferred to the accelerator   
+    # def on_before_batch_transfer(self, batch, dataloader_idx):
+    #     if self.trainer.training:
+    #         if self.transforms:
+    #             batch = self.transforms(batch)
+    #     return batch
+
+    # # Operates on a mini-batch after it is transferred to the accelerator
+    # def on_after_batch_transfer(self, batch, dataloader_idx):
+    #     batch['x'] = gpu_transforms(batch['x'])
+    #     return batch
+    
     def on_fit_start(self):
         tb = self.logger.experiment  # noqa
-        #
-        layout_loss_train = [r"loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
-        layout_loss_val = [r"loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
-        layout_loss_merge = [r"loss/train_loss", "loss/val_loss"]
-        layout_diceFG_merge = [r"diceFG/train_diceFG", "diceFG/val_diceFG"]
-        layout_dice_merge = [r"dice/train_dice", "dice/val_dice"]
-        layout_dice_p_cls_merge = [r"dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
+        layout_loss_train = ["loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
+        layout_loss_val = ["loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
+        layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
+        layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
+        layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
+        layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
+        #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
 
         layout = {
             "loss_split": {
@@ -51,6 +75,9 @@ class LitUNet2DModule(pl.LightningModule):
             "dice_p_cls_merge": {
                 "dice_p_cls": ["Multiline", layout_dice_p_cls_merge],
             },
+            # "assd_merge": {
+            #     "assd": ["Multiline", layout_assd_merge],
+            # },
         }
         tb.add_custom_scalars(layout)        
 
@@ -58,9 +85,9 @@ class LitUNet2DModule(pl.LightningModule):
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
-        losses, logits, masks, pred_cls = self._shared_step(batch, batch_idx)
+        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
         loss = self._loss_merge(losses)
-        metrics = self._shared_metric_step(loss, logits, masks, pred_cls)
+        metrics = self._shared_metric_step(loss, logits, masks, preds)
         self.log('loss/train_loss', loss.detach().cpu(), batch_size=masks.shape[0], prog_bar=True)
 
         for k, v in losses.items():
@@ -79,13 +106,14 @@ class LitUNet2DModule(pl.LightningModule):
 
             for i, score in enumerate(metrics["dice_p_cls"]):
                 self.logger.experiment.add_scalar(f"dice_p_cls/train_dice_p_cls_{i}", score, self.current_epoch)
+            #self.log("assd/train_assd", metrics["assd"], on_epoch=True)
         self.train_step_outputs.clear()
     
     def validation_step(self, batch, batch_idx):
-        losses, logits, masks, pred_cls = self._shared_step(batch, batch_idx)
+        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
         loss = self._loss_merge(losses)
         loss = loss.detach().cpu()
-        metrics = self._shared_metric_step(loss, logits, masks, pred_cls)
+        metrics = self._shared_metric_step(loss, logits, masks, preds)
         for l, v in losses.items():
             metrics[l] = v.detach().cpu()
         self._shared_metric_append(metrics, self.val_step_outputs)
@@ -107,29 +135,36 @@ class LitUNet2DModule(pl.LightningModule):
 
             for i, score in enumerate(metrics["dice_p_cls"]):
                 self.logger.experiment.add_scalar(f"dice_p_cls/val_dice_p_cls_{i}", score, self.current_epoch)
+            #self.log("assd/val_assd", metrics["assd"], on_epoch=True)
         self.val_step_outputs.clear()
 
     def configure_optimizers(self): # next step to improve this
         optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
-        # scheduler = lr_scheduler.LinearLR(
-        #     optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
-        # )
-        scheduler = lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=20, eta_min=0.00001
+        scheduler = lr_scheduler.LinearLR(
+            optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
         )
+        # scheduler = lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=20, eta_min=0.00001
+        # )
         #scheduler = None
         if scheduler is not None:
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         return {"optimizer": optimizer}
         
-    def loss(self, outputs, masks):
-        ce_loss = self.CEL(outputs, masks)
+    def loss(self, logits, preds, masks):
+        masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
 
+        ce_loss = self.CEL(logits, masks)
         l2_reg = torch.tensor(0.0, device="cuda").to(non_blocking=True)
+        
+        # torchmetrics Dice Score used as Dice Loss
+        dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
+
         for param in self.model.parameters():
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
         return {
             "ce_loss": ce_loss,
+            "dice_loss": dsc_loss,
             "l2_reg_loss": (l2_reg * self.l2_reg_w),
         }
     
@@ -137,28 +172,58 @@ class LitUNet2DModule(pl.LightningModule):
         return sum(losses.values())
     
     def _shared_step(self, batch, batch_idx, detach2cpu: bool =False):
-        imgs, masks = batch         # unpacking the batch
-        masks = masks.squeeze(1)    # removing the channel dimension
+        imgs = batch['img']     # unpacking the batch
+        masks = batch['seg']    # unpacking the batch
         logits = self.model(imgs)   # this implicitly calls the forward method
-
-        losses = self.loss(logits, masks)
-
+    
         with torch.no_grad():
-            pred_x = self.softmax(logits)
-            _, pred_cls = torch.max(pred_x, dim=1)
-            del pred_x
+            probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
+            preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
+            del probs
+
             if detach2cpu:
                 masks = masks.detach().cpu()
                 logits = logits.detach().cpu()
-                pred_cls = pred_cls.detach().cpu()
-            dice = mF.dice(pred_cls, masks, num_classes=self.n_classes)
-        return losses, logits, masks, pred_cls
+                preds = preds.detach().cpu()
+
+        losses = self.loss(logits,preds, masks)
+        return losses, logits, masks, preds
     
-    def _shared_metric_step(self, loss, logits, masks, pred_cls):
-        dice = mF.dice(pred_cls, masks, num_classes=self.n_classes)
-        diceFG = mF.dice(pred_cls, masks, num_classes=self.n_classes, ignore_index=0)   #ignore_index=0 means we ignore the background class
-        dice_p_cls = mF.dice(pred_cls, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
-        return {"loss": loss.detach().cpu(), "dice": dice, "diceFG": diceFG, "dice_p_cls": dice_p_cls}   
+    def _shared_metric_step(self, loss, logits, masks, preds):
+        # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
+        dice = mF.dice(preds, masks, num_classes=self.n_classes)
+        diceFG = mF.dice(preds, masks, num_classes=self.n_classes, ignore_index=0)   #ignore_index=0 means we ignore the background class
+        dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
+        # print(f"dice: {dice}")
+        # print(f"diceFG: {diceFG}")
+        # print(f"dice_p_cls: {dice_p_cls}")
+        # print(f"_shared_metric_step():")
+        # print(f"preds shape: {preds.shape}, masks shape: {masks.shape}")
+        # # print the unique values in the masks and preds tensors
+        # print(f"unique values in masks: {np.unique(masks.cpu().numpy())}")
+        # print(f"unique values in preds: {np.unique(preds.cpu().numpy())}")
+        # with torch.no_grad():
+        #     # Convert to one-hot encoded tensors
+        #     masks_one_hot = self._to_one_hot(masks, self.n_classes)
+        #     preds_one_hot = self._to_one_hot(preds, self.n_classes)
+        #     # print shapes of one-hot encoded masks and preds tensors
+        #     # print(f"masks_one_hot shape: {masks_one_hot.shape}, preds_one_hot shape: {preds_one_hot.shape}")
+        #     # # print the unique values in the one-hot encoded masks and preds tensors
+        #     # print(f"unique values in masks_one_hot: {np.unique(masks_one_hot.cpu().numpy())}")
+        #     # print(f"unique values in preds_one_hot: {np.unique(preds_one_hot.cpu().numpy())}")
+        #     # Filter out empty classes
+        #     preds_one_hot, masks_one_hot = self._filter_empty_classes(preds_one_hot, masks_one_hot)
+        # # calculate average symmetric surface distance (assd)
+        # assd = compute_average_surface_distance(preds_one_hot, masks_one_hot, symmetric=True)
+        # print(f"assd: {assd}")
+        # del masks_one_hot, preds_one_hot
+        return {
+            "loss": loss.detach().cpu(), 
+            "dice": dice, 
+            "diceFG": diceFG, 
+            "dice_p_cls": dice_p_cls, 
+            #"assd": assd
+        }           
 
     def _shared_metric_append(self, metrics, outputs):
         for k, v in metrics.items():
@@ -171,4 +236,37 @@ class LitUNet2DModule(pl.LightningModule):
         for m, v in outputs.items():
             stacked = torch.stack(v)
             results[m] = torch.mean(stacked) if m != "dice_p_cls" else torch.mean(stacked, dim=0)
-        return results     
+        return results
+
+    def _to_one_hot(self, tensor, num_classes):
+        """
+        Convert a tensor to one-hot encoding.
+        
+        Args:
+            tensor: The input tensor of shape (batch_size, 1, height, width) or (batch_size, height, width).
+            num_classes: The number of classes.
+        
+        Returns:
+            One-hot encoded tensor of shape (batch_size, num_classes, height, width).
+        """
+        if tensor.ndim == 4:
+            tensor = tensor.squeeze(1)  # Shape: (batch_size, height, width)
+        one_hot = F.one_hot(tensor, num_classes=num_classes)  # Shape: (batch_size, height, width, num_classes)
+        one_hot = one_hot.permute(0, 3, 1, 2)  # Shape: (batch_size, num_classes, height, width)
+        return one_hot       
+    
+    def _filter_empty_classes(self, preds_one_hot, masks_one_hot):
+        """
+        Filter out classes that are completely absent in either the predictions or ground truth.
+        
+        Args:
+            preds_one_hot: One-hot encoded predictions of shape (batch_size, num_classes, height, width).
+            masks_one_hot: One-hot encoded ground truth of shape (batch_size, num_classes, height, width).
+        
+        Returns:
+            Filtered predictions and ground truth with non-empty classes.
+        """
+        non_empty_classes = (masks_one_hot.sum(dim=[0, 2, 3]) != 0) & (preds_one_hot.sum(dim=[0, 2, 3]) != 0)
+        preds_one_hot = preds_one_hot[:, non_empty_classes]
+        masks_one_hot = masks_one_hot[:, non_empty_classes]
+        return preds_one_hot, masks_one_hot
