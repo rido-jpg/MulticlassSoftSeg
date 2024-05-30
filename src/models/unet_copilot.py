@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 # Basic UNet implementation initially created by copilot and then modified
 class UNet(nn.Module):
