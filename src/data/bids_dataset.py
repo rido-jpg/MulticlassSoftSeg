@@ -33,6 +33,7 @@ sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
 import external.fastnumpyio.fastnumpyio as fnio
+from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -122,12 +123,12 @@ class BidsDataset(Dataset):
 
         elif self.suffix == 'nii.gz':
             img = load_nifti_as_array(str(img_path))
-            mask = load_nifti_as_array(str(mask_path))
+            mask = load_nifti_as_array(str(mask_path), True)
 
         mask = np.array(mask, dtype=np.int64)   # Ensure mask is integer type
 
-        img = preprocess(img, False, self.do2D, self.binary, self.padding)
-        mask = preprocess(mask, True, self.do2D, self.binary, self.padding)
+        img = preprocess(img, False, self.binary)
+        mask = preprocess(mask, True, self.binary)
 
         # if self.padding:    # Move to transform or _preprocess?
         #     # Calculate the padding required to achieve the desired size
@@ -145,7 +146,12 @@ class BidsDataset(Dataset):
         if self.transform:
             data_dict = self.transform(data_dict)
 
-        logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
+        # Slice and Pad
+        if self.do2D:
+            data_dict[self.img_key] = slice_and_pad(data_dict[self.img_key], self.padding)
+            data_dict[self.seg_key] = slice_and_pad(data_dict[self.seg_key], self.padding)
+
+        #logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
         
         return data_dict
 
@@ -210,58 +216,11 @@ def create_bids_array_list_of_dicts(root_dir:str, prefix:str= "") -> list: #  no
 
     return list_of_array_dicts
 
-def load_nifti_as_array(file_path: str):
+def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
     #Load nifti file and convert to np array
-    nifti_image = NII.load(file_path)
+    nifti_image = NII.load(file_path, seg)
     nifti_np_array = nifti_image.get_array()
     return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
-
-def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
-    """
-    Export the central slice of a NIfTI image along the specified axis.
-    
-    Parameters:
-        nifti_np_array(): NIfTI image that has already been exported to a NumPy array
-        axis (int): Axis along which the central slice is to be taken (0, 1, or 2).
-                   0 - Sagittal, 1 - Coronal, 2 - Axial
-    Returns:
-        numpy.ndarray: The central slice as a NumPy array.
-    """
-    # Determine the slice index
-    slice_index = nifti_np_array.shape[axis] // 2
-    
-    # Extract the central slice based on the axis
-    if axis == 0:
-        slice_data = nifti_np_array[slice_index, :, :]
-    elif axis == 1:
-        slice_data = nifti_np_array[:, slice_index, :]
-    elif axis == 2:
-        slice_data = nifti_np_array[:, :, slice_index]
-    else:
-        raise ValueError("Invalid axis. Axis must be 0, 1, or 2.")
-
-    return slice_data
-
-def normalize(nifti_array:np.ndarray) -> np.ndarray:
-    # Z-Score standardization
-    # Mask to exclude zeros
-    mask = nifti_array != 0
-    masked_array = nifti_array[mask]
-    
-    if masked_array.size == 0:
-        raise ValueError("No non-zero elements found in the array for normalization.")
-
-    mean = masked_array.mean()
-    std = masked_array.std()
-    
-    # Only apply normalization to non-zero elements
-    if std > 0:
-        normalized_array = nifti_array.copy()  # Create a copy to retain the original zero values
-        normalized_array[mask] = (masked_array - mean) / std
-    else:
-        raise ValueError("Standard deviation of the masked elements is zero, normalization cannot be performed.")
-    
-    return normalized_array
 
 def load_normalized_central_slice_as_array(file_path: str)->np.ndarray:
     nifti_array = load_nifti_as_array(file_path)
@@ -362,46 +321,6 @@ def save_bids_niftis_as_fnio(list_of_path_dicts:list):
                 convert_nifti_to_fnio(path_as_string)
         print(f"subject {subject_dict.get('subject')} done.")
         print(f"-------------------------------")
-
-def preprocess(img:np.array, seg:bool, do2D:bool, binary:bool, padding:tuple[int, int]) -> torch.Tensor:
-        #Normalize the MRI image
-        if not seg:
-            img = normalize(img)
-
-        # Get a 2D slice if specified
-        if do2D:
-            img= get_central_slice(img)
-
-        # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
-        if binary and seg:
-            img[img > 0] = 1
-
-        # Convert numpy arrays to PyTorch tensors
-        img = torch.from_numpy(img)
-
-        # Add a channel dimension if it's missing
-        if img.ndim == 2:  # if the image is 2D
-            img = img.unsqueeze(0)
-        elif img.ndim == 3 and seg:  # if the segmentation mask is 3D
-            img = img.unsqueeze(0)
-
-        # Ensure the image is in the correct type
-        if not seg:
-            img = img.float()
-        else:
-            img = img.long()
-
-        if padding:    # Move to transform?
-            # Calculate the padding required to achieve the desired size
-            h, w = img.shape[-2:]
-            target_h, target_w = padding
-            pad_h = max(0, target_h - h)
-            pad_w = max(0, target_w - w)
-            
-            # Apply padding to the image
-            img = F.pad(img, (0, pad_w, 0, pad_h))
-
-        return img
 
 
 # class Preprocess(nn.Module):
