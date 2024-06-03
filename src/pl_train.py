@@ -16,6 +16,7 @@ from monai.transforms import (
 )
 import numpy as np
 import torch
+import math
 
 if __name__ == '__main__':
     # Set device automatically handled by PyTorch Lightning
@@ -38,18 +39,32 @@ if __name__ == '__main__':
     batch_size = 24     # batch size
     max_epochs = 400    # number of epochs to train
 
+    # augmentations = Compose(
+    #     [   
+    #         RandAdjustContrastd(keys=img_key, prob=0.8, gamma=(0.7,1.5)),
+    #         RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
+    #         RandAffined(keys=brats_keys, prob=0.4, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
+    #         RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
+    #         RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
+    #         SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="constant"),
+    #         CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
+    #         #ToTensord(keys=brats_keys),
+    #     ]
+    # )
+    
     augmentations = Compose(
-    [   
-        RandAdjustContrastd(keys=img_key, prob=0.8, gamma=(0.7,1.5)),
-        RandRotated(keys=brats_keys, range_x=0, range_y=0, range_z=[-np.pi/4, np.pi/4], prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
-        RandAffined(keys=brats_keys, prob=0.4, translate_range=(6, 2, 6), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
-        RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
-        RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
-        SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="edge"),
-        CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
-        #ToTensord(keys=brats_keys),
-    ]
-)
+        [   
+            RandAdjustContrastd(keys=img_key, prob=0.8, gamma=(0.7,1.5)),
+            RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.75,keep_size=True, mode =["bilinear", "nearest"]),
+            RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
+            RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
+            RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
+            SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="constant"),
+            CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
+            #ToTensord(keys=brats_keys),
+        ]
+    )
+
 
     model = LitUNet2DModule(
         in_channels=1,
@@ -93,7 +108,7 @@ if __name__ == '__main__':
         #fast_dev_run=True,
         max_epochs=max_epochs, 
         default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', 
-        log_every_n_steps=1, 
+        log_every_n_steps=5, 
         accelerator='auto',
         logger=logger,
         profiler="simple"
