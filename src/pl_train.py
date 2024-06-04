@@ -32,11 +32,11 @@ if __name__ == '__main__':
         binary = False
 
     # Hyperparameters
-    start_lr = 0.0001   # starting learning rate
-    lr_end_factor = 0.1 # factor to reduce learning rate to at the end of training
+    start_lr = 0.001   # starting learning rate
+    lr_end_factor = 0.01 # factor to reduce learning rate to at the end of training
     l2_reg_w = 0.001    # weight for L2 regularization
     dsc_loss_w = 1.0    # weight for Dice loss
-    batch_size = 24     # batch size
+    batch_size = 32     # batch size
     max_epochs = 400    # number of epochs to train
 
     # augmentations = Compose(
@@ -65,6 +65,8 @@ if __name__ == '__main__':
         ]
     )
 
+    #augmentations = None
+
 
     model = LitUNet2DModule(
         in_channels=1,
@@ -73,6 +75,7 @@ if __name__ == '__main__':
         lr_end_factor=lr_end_factor,
         n_classes=n_classes,
         l2_reg_w=l2_reg_w,
+        epochs=max_epochs,
     )  
     data_module = BidsDataModule(
         data_dir = data_dir,
@@ -82,10 +85,11 @@ if __name__ == '__main__':
         test_transform=None,
     )
 
-    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_with_augmentations")
+    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_binary_with_augmentations")
 
     #Directory for logs
-    filepath_logs = os.getcwd() + "/lightning_logs/"
+    #filepath_logs = os.getcwd() + "/lightning_logs/"
+    filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
 
     # Determine next version number
     model_name = model.__class__.__name__
@@ -103,15 +107,21 @@ if __name__ == '__main__':
         default_hp_metric=False,
     )
 
+    # Profiler to monitor performance
+    dirpath = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/profiler_logs'
+    #profiler = pl.profilers.AdvancedProfiler(dirpath=dirpath, filename='profiler_logs')
+    profiler = pl.profilers.SimpleProfiler(dirpath=dirpath, filename='performance_logs')
+
     # Trainer handles training loop
     trainer = pl.Trainer(
         #fast_dev_run=True,
         max_epochs=max_epochs, 
-        default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/', 
-        log_every_n_steps=5, 
+        default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs', 
+        log_every_n_steps=10, 
         accelerator='auto',
         logger=logger,
-        profiler="simple"
+        profiler=profiler,
+        #profiler='simple'
     )
     
     # Train the model

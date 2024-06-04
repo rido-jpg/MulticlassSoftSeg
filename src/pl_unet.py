@@ -1,5 +1,6 @@
 import os
 import torch
+import torchmetrics
 import numpy as np
 import lightning.pytorch as pl
 import torch.nn.functional as F
@@ -15,7 +16,7 @@ from monai.metrics import DiceMetric, compute_average_surface_distance
 
 
 class LitUNet2DModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
+    def __init__(self, in_channels:int, out_channels:int, epochs:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
         super(LitUNet2DModule, self).__init__()
         self.save_hyperparameters()
 
@@ -24,6 +25,7 @@ class LitUNet2DModule(pl.LightningModule):
         self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
         self.dsc_loss_w = dsc_loss_w
+        self.epochs = epochs
 
         self.n_classes = n_classes
         self.transforms = None
@@ -35,6 +37,9 @@ class LitUNet2DModule(pl.LightningModule):
         self.CEL = nn.CrossEntropyLoss()
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=True, softmax=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
+        self.Dice = torchmetrics.Dice()
+        self.DiceFG = torchmetrics.Dice(ignore_index=0) #ignore_index=0 means we ignore the background class
+        #self.Dice_p_cls = torchmetrics.Dice(average=None, num_classes=self.n_classes)   # average='none' returns dice per class
 
     # # Operates on a mini-batch before it is transferred to the accelerator   
     # def on_before_batch_transfer(self, batch, dataloader_idx):
@@ -55,6 +60,9 @@ class LitUNet2DModule(pl.LightningModule):
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
         layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
+        layout_dice_ET_merge = ["dice_ET/train_dice_ET", "dice_ET/val_dice_ET"]
+        layout_dice_TC_merge = ["dice_TC/train_dice_TC", "dice_TC/val_dice_TC"]
+        layout_dice_WT_merge = ["dice_WT/train_dice_WT", "dice_WT/val_dice_WT"] 
         layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
         #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
 
@@ -74,6 +82,11 @@ class LitUNet2DModule(pl.LightningModule):
             },
             "dice_p_cls_merge": {
                 "dice_p_cls": ["Multiline", layout_dice_p_cls_merge],
+            },
+            "Brats Dice Scores [ET=3, TC=1+3, WT=1+2+3]": {
+                "dice_ET": ["Multiline", layout_dice_ET_merge],
+                "dice_TC": ["Multiline", layout_dice_TC_merge],
+                "dice_WT": ["Multiline", layout_dice_WT_merge],
             },
             # "assd_merge": {
             #     "assd": ["Multiline", layout_assd_merge],
@@ -102,6 +115,11 @@ class LitUNet2DModule(pl.LightningModule):
 
             self.log("dice/train_dice", metrics["dice"], on_epoch=True)
             self.log("diceFG/train_diceFG", metrics["diceFG"], on_epoch=True)
+            #Brats Dice Scores
+            self.log("dice_TC/train_dice_TC", metrics["dice_TC"], on_epoch=True)
+            self.log("dice_ET/train_dice_ET", metrics["dice_ET"], on_epoch=True)
+            self.log("dice_WT/train_dice_WT", metrics["dice_WT"], on_epoch=True)
+
             self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
             for i, score in enumerate(metrics["dice_p_cls"]):
@@ -131,6 +149,12 @@ class LitUNet2DModule(pl.LightningModule):
 
             self.log("dice/val_dice", metrics["dice"], on_epoch=True)
             self.log("diceFG/val_diceFG", metrics["diceFG"], on_epoch=True)
+
+            #Brats Dice Scores
+            self.log("dice_TC/val_dice_TC", metrics["dice_TC"], on_epoch=True)
+            self.log("dice_ET/val_dice_ET", metrics["dice_ET"], on_epoch=True)
+            self.log("dice_WT/val_dice_WT", metrics["dice_WT"], on_epoch=True)
+
             self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
             for i, score in enumerate(metrics["dice_p_cls"]):
@@ -141,7 +165,7 @@ class LitUNet2DModule(pl.LightningModule):
     def configure_optimizers(self): # next step to improve this
         optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
         scheduler = lr_scheduler.LinearLR(
-            optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=20
+            optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=self.epochs
         )
         # scheduler = lr_scheduler.CosineAnnealingLR(
         #     optimizer, T_max=20, eta_min=0.00001
@@ -158,7 +182,13 @@ class LitUNet2DModule(pl.LightningModule):
         l2_reg = torch.tensor(0.0, device="cuda").to(non_blocking=True)
         
         # torchmetrics Dice Score used as Dice Loss
-        dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
+        # dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
+
+        # Brats Dice Loss (Sum of dice_ET, dice_TC, dice_WT divided by 3)
+        dice_ET = self.DiceFG((preds == 3), (masks == 3))
+        dice_TC = self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))
+        dice_WT = self.DiceFG((preds > 0), (masks > 0))
+        dsc_loss = (1 - (dice_ET + dice_TC + dice_WT) / 3) * self.dsc_loss_w
 
         for param in self.model.parameters():
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
@@ -176,6 +206,8 @@ class LitUNet2DModule(pl.LightningModule):
         masks = batch['seg']    # unpacking the batch
         logits = self.model(imgs)   # this implicitly calls the forward method
     
+        del imgs # delete the images tensor to free up memory
+
         with torch.no_grad():
             probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
             preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
@@ -187,13 +219,34 @@ class LitUNet2DModule(pl.LightningModule):
                 preds = preds.detach().cpu()
 
         losses = self.loss(logits,preds, masks)
+
         return losses, logits, masks, preds
     
     def _shared_metric_step(self, loss, logits, masks, preds):
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
-        dice = mF.dice(preds, masks, num_classes=self.n_classes)
-        diceFG = mF.dice(preds, masks, num_classes=self.n_classes, ignore_index=0)   #ignore_index=0 means we ignore the background class
+        # Overall Dice Scores
+        dice = self.Dice(preds, masks)
+        diceFG = self.DiceFG(preds, masks)
         dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
+
+        # ET (Enhancing Tumor): label 3
+        preds_ET = (preds == 3)
+        masks_ET = (masks == 3)
+        dice_ET = self.DiceFG(preds_ET, masks_ET)
+        del preds_ET, masks_ET
+
+        # TC(Tumor Core): ET + NCR = label 1 + label 3
+        preds_TC = (preds == 1) | (preds == 3)
+        masks_TC = (masks == 1) | (masks == 3)
+        dice_TC = self.DiceFG(preds_TC, masks_TC)
+        del preds_TC, masks_TC
+
+        # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
+        preds_WT = (preds > 0)
+        masks_WT = (masks > 0)
+        dice_WT = self.DiceFG(preds_WT, masks_WT)
+        del preds_WT, masks_WT
+
         # print(f"dice: {dice}")
         # print(f"diceFG: {diceFG}")
         # print(f"dice_p_cls: {dice_p_cls}")
@@ -219,9 +272,12 @@ class LitUNet2DModule(pl.LightningModule):
         # del masks_one_hot, preds_one_hot
         return {
             "loss": loss.detach().cpu(), 
-            "dice": dice, 
-            "diceFG": diceFG, 
-            "dice_p_cls": dice_p_cls, 
+            "dice": dice.detach().cpu(), 
+            "diceFG": diceFG.detach().cpu(), 
+            "dice_p_cls": dice_p_cls.detach().cpu(), 
+            "dice_ET": dice_ET.detach().cpu(),
+            "dice_TC": dice_TC.detach().cpu(),
+            "dice_WT": dice_WT.detach().cpu(),
             #"assd": assd
         }           
 
