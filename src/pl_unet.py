@@ -55,8 +55,8 @@ class LitUNet2DModule(pl.LightningModule):
     
     def on_fit_start(self):
         tb = self.logger.experiment  # noqa
-        layout_loss_train = ["loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
-        layout_loss_val = ["loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
+        layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
+        layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
         layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
@@ -185,16 +185,18 @@ class LitUNet2DModule(pl.LightningModule):
         # dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
 
         # Brats Dice Loss (Sum of dice_ET, dice_TC, dice_WT divided by 3)
-        dice_ET = self.DiceFG((preds == 3), (masks == 3))
-        dice_TC = self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))
-        dice_WT = self.DiceFG((preds > 0), (masks > 0))
-        dsc_loss = (1 - (dice_ET + dice_TC + dice_WT) / 3) * self.dsc_loss_w
+        dice_ET_loss = (1 - self.DiceFG((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
+        dice_TC_loss = (1 - self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3)) ) * self.dsc_loss_w / 3
+        dice_WT_loss = (1 - self.DiceFG((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
+        #dsc_loss = (1 - (dice_ET + dice_TC + dice_WT) / 3) * self.dsc_loss_w
 
         for param in self.model.parameters():
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
         return {
             "ce_loss": ce_loss,
-            "dice_loss": dsc_loss,
+            "dice_ET_loss": dice_ET_loss,
+            "dice_TC_loss": dice_TC_loss,
+            "dice_WT_loss": dice_WT_loss,
             "l2_reg_loss": (l2_reg * self.l2_reg_w),
         }
     
@@ -230,22 +232,13 @@ class LitUNet2DModule(pl.LightningModule):
         dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
 
         # ET (Enhancing Tumor): label 3
-        preds_ET = (preds == 3)
-        masks_ET = (masks == 3)
-        dice_ET = self.DiceFG(preds_ET, masks_ET)
-        del preds_ET, masks_ET
+        dice_ET = self.DiceFG((preds == 3), (masks == 3))
 
         # TC(Tumor Core): ET + NCR = label 1 + label 3
-        preds_TC = (preds == 1) | (preds == 3)
-        masks_TC = (masks == 1) | (masks == 3)
-        dice_TC = self.DiceFG(preds_TC, masks_TC)
-        del preds_TC, masks_TC
+        dice_TC = self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))
 
         # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
-        preds_WT = (preds > 0)
-        masks_WT = (masks > 0)
-        dice_WT = self.DiceFG(preds_WT, masks_WT)
-        del preds_WT, masks_WT
+        dice_WT = self.DiceFG((preds > 0), (masks > 0))
 
         # print(f"dice: {dice}")
         # print(f"diceFG: {diceFG}")
