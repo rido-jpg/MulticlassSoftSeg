@@ -136,7 +136,9 @@ weights/
 *.gif
 *.png
 *.npy
+*.prof
 
+profiler_logs
 lightning_logs
 lightning_logs*
 fid
@@ -161,3 +163,4 @@ tmp_*.py
 tmp
 tmp/*
 poetry.lock
+src/data/test.ipynb
