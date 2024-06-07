@@ -65,7 +65,7 @@ if __name__ == '__main__':
         ]
     )
 
-    #augmentations = None
+    augmentations = None
 
 
     model = LitUNet2DModule(
@@ -85,7 +85,7 @@ if __name__ == '__main__':
         test_transform=None,
     )
 
-    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_binary_with_augmentations")
+    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_binary:{binary}_no_augmentations")
 
     #Directory for logs
     #filepath_logs = os.getcwd() + "/lightning_logs/"
