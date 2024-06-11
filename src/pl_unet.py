@@ -8,6 +8,8 @@ import torchmetrics.functional as mF
 from torch.optim import lr_scheduler
 from torch import nn
 from models.unet_copilot import UNet
+from models.unet2D_H import Unet2D
+from models.unet3D_H import Unet3D
 #from medpy.metric.binary import assd
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
@@ -15,12 +17,17 @@ from monai.metrics import DiceMetric, compute_average_surface_distance
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
 
 
-class LitUNet2DModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
-        super(LitUNet2DModule, self).__init__()
+class LitUNetModule(pl.LightningModule):
+    def __init__(self, in_channels:int, out_channels:int, epochs:int, do2D:bool=True,  start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
+        super(LitUNetModule, self).__init__()
         self.save_hyperparameters()
 
-        self.model = UNet(in_channels, out_channels)
+        if do2D:
+            self.model = UNet(in_channels, out_channels)
+            self.model = Unet2D(dim=in_channels, out_dim = out_channels)
+        else:
+            self.model = Unet3D(dim=in_channels, out_dim = out_channels)
+
         self.start_lr = start_lr
         self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
