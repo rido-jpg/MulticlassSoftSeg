@@ -4,6 +4,7 @@ import torch.nn as nn
 from einops import rearrange
 from functools import partial
 import math
+#torch.backends.cudnn.enabled = False
 
 
 def default(val, d):
@@ -48,10 +49,10 @@ class LayerNorm(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, groups=8):
+    def __init__(self, dim, dim_out, groups):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding=1)
-        self.norm = nn.GroupNorm(groups, dim_out)
+        self.norm = nn.GroupNorm(dim_out, dim_out)
         self.act = nn.SiLU()
 
     def forward(self, x, scale_shift=None):
