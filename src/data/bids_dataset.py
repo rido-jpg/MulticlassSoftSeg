@@ -19,20 +19,16 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
 
 from monai.transforms import (
-    Activations,
+    SpatialPadd,
+    CastToTyped,
     Compose,
-    EnsureChannelFirstd,
-    LoadImaged,
-    RotateD, 
-    RandRotateD,
-    ScaleIntensityd
 )
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
-import external.fastnumpyio.fastnumpyio as fnio
+import utils.fastnumpyio.fastnumpyio as fnio
 from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice
 
 # Configure logging
@@ -59,10 +55,10 @@ class BidsDataModule(pl.LightningDataModule):
         self.format = format
         self.do2D = do2D
         self.binary = binary
-        self.test_transform = test_transform
         self.padding = padding
         self.batch_size = batch_size 
         self.train_transform = train_transform   
+        self.test_transform = test_transform
 
     def setup(self, stage: str = None) -> None:
         self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.train_transform,padding=self.padding)
@@ -88,7 +84,7 @@ class BidsDataset(Dataset):
         suffix (str): The file extension of the MRI and segmentation files. Can be modified if we saved the files in different format than .nii.gz, e.g. in fast numpy io format "fnio"
         do2D (bool): if True, use 2D slices of the MRI images and segmentation masks
         binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
-        transform(): transformation of image data
+        transform(): transformation of image data (augmentations)
         """
 
         self.root_dir = root_dir   
@@ -96,13 +92,24 @@ class BidsDataset(Dataset):
         self.contrast = contrast
         self.suffix = suffix
         self.do2D = do2D
-        #self.preprocess = Preprocess()
         self.transform = transform
         self.binary = binary
         self.padding = padding
         self.dict_keys = ['img', 'seg']
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
+
+        self.postprocess = Compose(
+            [
+                SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="constant"),
+                CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
+            ]
+        )
+
+        if do2D:
+            self.padding = (256, 256)
+        else:
+            self.padding = (256, 256, 256)
 
         self.bids_list = create_bids_path_list_of_dicts(self.root_dir, prefix=self.prefix, suffix=self.suffix)
         
@@ -146,12 +153,19 @@ class BidsDataset(Dataset):
         if self.transform:
             data_dict = self.transform(data_dict)
 
+        data_dict = self.postprocess(data_dict) # padding and casting to tensor
+
         # Slice and Pad
         if self.do2D:
-            data_dict[self.img_key] = slice_and_pad(data_dict[self.img_key], self.padding)
-            data_dict[self.seg_key] = slice_and_pad(data_dict[self.seg_key], self.padding)
+            data_dict[self.img_key] = get_central_slice(data_dict[self.img_key])
+            data_dict[self.seg_key] = get_central_slice(data_dict[self.seg_key])
+            # data_dict[self.img_key] = slice_and_pad(data_dict[self.img_key], self.padding)
+            # data_dict[self.seg_key] = slice_and_pad(data_dict[self.seg_key], self.padding)
+
 
         #logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
+        # logging.info(f"img.dtype: {data_dict[self.img_key].dtype}, img.shape: {data_dict[self.img_key].shape}")
+        # logging.info(f"seg.dtype: {data_dict[self.seg_key].dtype}, seg.shape: {data_dict[self.seg_key].shape}")
         
         return data_dict
 
