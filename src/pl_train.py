@@ -1,6 +1,6 @@
 import os
 import lightning.pytorch as pl
-from pl_unet import LitUNet2DModule
+from pl_unet import LitUNetModule
 from data.bids_dataset import BidsDataModule, brats_keys
 from lightning.pytorch.loggers import TensorBoardLogger
 from monai.transforms import (
@@ -25,6 +25,7 @@ if __name__ == '__main__':
     n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
     out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
     img_key = brats_keys[0]
+    do2D = False     # Use slices and 2D Unet or whole MRI and 3D Unet
 
     if n_classes == 2:
         binary = True
@@ -36,8 +37,8 @@ if __name__ == '__main__':
     lr_end_factor = 0.01 # factor to reduce learning rate to at the end of training
     l2_reg_w = 0.001    # weight for L2 regularization
     dsc_loss_w = 1.0    # weight for Dice loss
-    batch_size = 32     # batch size
-    max_epochs = 400    # number of epochs to train
+    batch_size = 4     # batch size
+    max_epochs = 40    # number of epochs to train
 
     # augmentations = Compose(
     #     [   
@@ -59,40 +60,44 @@ if __name__ == '__main__':
             RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
             RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
             RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
-            SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="constant"),
-            CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
             #ToTensord(keys=brats_keys),
         ]
     )
 
-    augmentations = None
+    #augmentations = None
 
-
-    model = LitUNet2DModule(
-        in_channels=1,
-        out_channels=out_channels,
-        start_lr=start_lr,
-        lr_end_factor=lr_end_factor,
-        n_classes=n_classes,
-        l2_reg_w=l2_reg_w,
-        epochs=max_epochs,
+    model = LitUNetModule(
+        in_channels = 1,
+        out_channels = out_channels,
+        do2D = do2D,
+        start_lr = start_lr,
+        lr_end_factor = lr_end_factor,
+        n_classes = n_classes,
+        l2_reg_w = l2_reg_w,
+        epochs = max_epochs,
     )  
     data_module = BidsDataModule(
         data_dir = data_dir,
+        do2D = do2D,
         binary = binary,
         batch_size = batch_size,
         train_transform = augmentations,
         test_transform=None,
     )
+    
+    if do2D:
+        model_name='2D_UNet'
+    else:
+        model_name='3D_UNet'
 
-    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_binary:{binary}_no_augmentations")
+    suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}__binary:{binary}_with_augmentations")
 
     #Directory for logs
     #filepath_logs = os.getcwd() + "/lightning_logs/"
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
 
     # Determine next version number
-    model_name = model.__class__.__name__
+    #model_name = model.__class__.__name__
     log_dir = os.path.join(filepath_logs, model_name)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -120,8 +125,8 @@ if __name__ == '__main__':
         log_every_n_steps=10, 
         accelerator='auto',
         logger=logger,
-        profiler=profiler,
-        #profiler='simple'
+        #profiler=profiler,
+        profiler='simple'
     )
     
     # Train the model
