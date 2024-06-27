@@ -12,7 +12,7 @@ class Unet3D(nn.Module):
         init_dim=None,
         out_dim=None,
         dim_mults=(1, 2, 4, 8),
-        channels=1,
+        channels=1, # 1 for grayscale, 3 for RGB
         conditional_dimensions=0,
         resnet_block_groups=8,
         learned_variance=False,
@@ -144,7 +144,7 @@ class Block3D(nn.Module):
     def __init__(self, dim, dim_out, groups=8):
         super().__init__()
         self.proj = nn.Conv3d(dim, dim_out, 3, padding=1)
-        self.norm = nn.GroupNorm(dim_out, dim_out)
+        self.norm = nn.GroupNorm(groups, dim_out)
         # self.act = nn.SiLU()
         self.act = nn.LeakyReLU()
 
