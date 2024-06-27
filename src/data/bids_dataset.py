@@ -21,6 +21,7 @@ from pathlib import Path
 from monai.transforms import (
     SpatialPadd,
     CastToTyped,
+    ResizeWithPadOrCropd,
     Compose,
 )
 
@@ -48,22 +49,22 @@ brats_keys = ['img', 'seg']
 # )
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, train_transform=None, test_transform=None, padding=(256, 256), batch_size:int=2):
+    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, train_transform=None, test_transform=None, resize:tuple[int, int, int]=(200, 200, 152), batch_size:int=2):
         super().__init__()
         self.data_dir = data_dir
         self.contrast = contrast
         self.format = format
         self.do2D = do2D
         self.binary = binary
-        self.padding = padding
+        self.resize = resize
         self.batch_size = batch_size 
         self.train_transform = train_transform   
         self.test_transform = test_transform
 
     def setup(self, stage: str = None) -> None:
-        self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.train_transform,padding=self.padding)
-        self.val_dataset = BidsDataset(self.data_dir + '/val', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,padding=self.padding)
-        self.test_dataset = BidsDataset(self.data_dir + '/test', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,padding=self.padding)
+        self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.train_transform,resize=self.resize)
+        self.val_dataset = BidsDataset(self.data_dir + '/val', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,resize=self.resize)
+        self.test_dataset = BidsDataset(self.data_dir + '/test', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,resize=self.resize)
         
     def train_dataloader(self) -> torch.Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
@@ -75,16 +76,17 @@ class BidsDataModule(pl.LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
 
 class BidsDataset(Dataset):
-    def __init__(self, root_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=True, transform=None, padding:tuple[float,float]=(256, 256)):
+    def __init__(self, root_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=False, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):
         """
         Parameters:
         root_dir (str): The root directory containing subdirectories for each subject.
         prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
         contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
-        suffix (str): The file extension of the MRI and segmentation files. Can be modified if we saved the files in different format than .nii.gz, e.g. in fast numpy io format "fnio"
+        suffix (str): The file extension of the MRI and segmentation files. Can be modified if we saved the files in different format than .nii.gz, e.g. in fast numpy io format "fnio" 
         do2D (bool): if True, use 2D slices of the MRI images and segmentation masks
         binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
         transform(): transformation of image data (augmentations)
+        resize (tuple): size of the image to be resized to
         """
 
         self.root_dir = root_dir   
@@ -94,22 +96,21 @@ class BidsDataset(Dataset):
         self.do2D = do2D
         self.transform = transform
         self.binary = binary
-        self.padding = padding
+        #self.padding = padding
+        self.resize = resize
         self.dict_keys = ['img', 'seg']
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
 
+        if do2D:
+            self.resize = self.resize[:2]
+
         self.postprocess = Compose(
             [
-                SpatialPadd(keys=brats_keys, spatial_size=(256, 256, 256), mode="constant"),
+                ResizeWithPadOrCropd(keys=brats_keys, spatial_size=self.resize, mode="symmetric"),
                 CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
             ]
         )
-
-        if do2D:
-            self.padding = (256, 256)
-        else:
-            self.padding = (256, 256, 256)
 
         self.bids_list = create_bids_path_list_of_dicts(self.root_dir, prefix=self.prefix, suffix=self.suffix)
         
@@ -132,21 +133,10 @@ class BidsDataset(Dataset):
             img = load_nifti_as_array(str(img_path))
             mask = load_nifti_as_array(str(mask_path), True)
 
-        mask = np.array(mask, dtype=np.int64)   # Ensure mask is integer type
+        mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type
 
         img = preprocess(img, False, self.binary)
         mask = preprocess(mask, True, self.binary)
-
-        # if self.padding:    # Move to transform or _preprocess?
-        #     # Calculate the padding required to achieve the desired size
-        #     h, w = img.shape[-2:]
-        #     target_h, target_w = self.padding
-        #     pad_h = max(0, target_h - h)
-        #     pad_w = max(0, target_w - w)
-            
-        #     # Apply padding to the image and segmentation mask
-        #     img = F.pad(img, (0, pad_w, 0, pad_h))
-        #     mask = F.pad(mask, (0, pad_w, 0, pad_h))
 
         data_dict = {self.img_key: img, self.seg_key: mask}
 
@@ -163,7 +153,7 @@ class BidsDataset(Dataset):
             # data_dict[self.seg_key] = slice_and_pad(data_dict[self.seg_key], self.padding)
 
 
-        #logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
+        # logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
         # logging.info(f"img.dtype: {data_dict[self.img_key].dtype}, img.shape: {data_dict[self.img_key].shape}")
         # logging.info(f"seg.dtype: {data_dict[self.seg_key].dtype}, seg.shape: {data_dict[self.seg_key].shape}")
         
