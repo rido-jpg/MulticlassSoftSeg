@@ -1,10 +1,12 @@
 import os
+import sys
 import torch
 import torchmetrics
 import numpy as np
 import lightning.pytorch as pl
 import torch.nn.functional as F
 import torchmetrics.functional as mF
+from pathlib import Path
 from torch.optim import lr_scheduler
 from torch import nn
 from models.unet_copilot import UNet
@@ -18,21 +20,26 @@ from monai.metrics import DiceMetric, compute_average_surface_distance
 
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, do2D:bool=True,  start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
+    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0):
         super(LitUNetModule, self).__init__()
         self.save_hyperparameters()
 
-        if do2D:
-            self.model = UNet(in_channels, out_channels)
-            self.model = Unet2D(dim=in_channels, out_dim = out_channels)
-        else:
-            self.model = Unet3D(dim=in_channels, out_dim = out_channels)
+        self.do2D = do2D
+        self.binary = binary
 
         self.start_lr = start_lr
         self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
         self.dsc_loss_w = dsc_loss_w
         self.epochs = epochs
+        self.dim = dim
+        self.groups = groups    # number of resnet block groups
+
+        if self.do2D:
+            #self.model = UNet(in_channels, out_channels)
+            self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels)
+        else:
+            self.model = Unet3D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
 
         self.n_classes = n_classes
         self.transforms = None
@@ -42,7 +49,7 @@ class LitUNetModule(pl.LightningModule):
 
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
-        #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=True, softmax=True, batch=True) # Monai Dice Loss
+        #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
         self.DiceFG = torchmetrics.Dice(ignore_index=0) #ignore_index=0 means we ignore the background class
@@ -170,14 +177,13 @@ class LitUNetModule(pl.LightningModule):
         self.val_step_outputs.clear()
 
     def configure_optimizers(self): # next step to improve this
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr, weight_decay=1e-5)
         scheduler = lr_scheduler.LinearLR(
             optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=self.epochs
         )
         # scheduler = lr_scheduler.CosineAnnealingLR(
-        #     optimizer, T_max=20, eta_min=0.00001
+        #     optimizer, T_max=self.epochs, eta_min=0
         # )
-        #scheduler = None
         if scheduler is not None:
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         return {"optimizer": optimizer}
@@ -186,15 +192,16 @@ class LitUNetModule(pl.LightningModule):
         masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
 
         ce_loss = self.CEL(logits, masks)
+
         l2_reg = torch.tensor(0.0, device="cuda").to(non_blocking=True)
         
         # torchmetrics Dice Score used as Dice Loss
         # dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
 
         # Brats Dice Loss (Sum of dice_ET, dice_TC, dice_WT divided by 3)
-        dice_ET_loss = (1 - self.DiceFG((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
-        dice_TC_loss = (1 - self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3)) ) * self.dsc_loss_w / 3
-        dice_WT_loss = (1 - self.DiceFG((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
+        dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
+        dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3
+        dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
         #dsc_loss = (1 - (dice_ET + dice_TC + dice_WT) / 3) * self.dsc_loss_w
 
         for param in self.model.parameters():
@@ -218,6 +225,12 @@ class LitUNetModule(pl.LightningModule):
         del imgs # delete the images tensor to free up memory
 
         with torch.no_grad():
+
+            if not self.binary:
+                # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
+                #logits_ET = torch.argmax(logits,)
+                pass
+
             probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
             preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
             del probs
@@ -237,6 +250,15 @@ class LitUNetModule(pl.LightningModule):
         dice = self.Dice(preds, masks)
         diceFG = self.DiceFG(preds, masks)
         dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
+
+        # in the case that a class is not available in ground truth and preciction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
+        for idx, score in enumerate(dice_p_cls):
+            if score.isnan():
+                print(f"score: {score}")
+                print(f"unique values in masks: {np.unique(masks.cpu().numpy())}")
+                print(f"unique values in preds: {np.unique(preds.cpu().numpy())}")
+                dice_p_cls[idx] = 1.0
+                print(f"score: {score}")
 
         # ET (Enhancing Tumor): label 3
         dice_ET = self.DiceFG((preds == 3), (masks == 3))
