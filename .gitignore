@@ -164,3 +164,7 @@ tmp
 tmp/*
 poetry.lock
 src/data/test.ipynb
+utils/fastnumpyio
+train_H.py
+pl_unet_H.py
+src/utils/filepaths_H.py
