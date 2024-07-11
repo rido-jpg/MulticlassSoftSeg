@@ -133,17 +133,27 @@ class BidsDataset(Dataset):
             img = load_nifti_as_array(str(img_path))
             mask = load_nifti_as_array(str(mask_path), True)
 
-        mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type
+        #print(f"\nStraight after loading: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
 
+        mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type
+        
+        #print(f"\nAfter type conversion: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
+    
         img = preprocess(img, False, self.binary)
         mask = preprocess(mask, True, self.binary)
+
+        #print(f"\nAfter preprocessing: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
 
         data_dict = {self.img_key: img, self.seg_key: mask}
 
         if self.transform:
             data_dict = self.transform(data_dict)
+        
+        #print(f"\nAfter transform: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")  
 
         data_dict = self.postprocess(data_dict) # padding and casting to tensor
+
+        #print(f"\nAfter postprocessing: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
 
         # Slice and Pad
         if self.do2D:
