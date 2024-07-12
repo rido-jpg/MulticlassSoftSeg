@@ -254,11 +254,7 @@ class LitUNetModule(pl.LightningModule):
         # in the case that a class is not available in ground truth and preciction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
         for idx, score in enumerate(dice_p_cls):
             if score.isnan():
-                print(f"score: {score}")
-                print(f"unique values in masks: {np.unique(masks.cpu().numpy())}")
-                print(f"unique values in preds: {np.unique(preds.cpu().numpy())}")
                 dice_p_cls[idx] = 1.0
-                print(f"score: {score}")
 
         # ET (Enhancing Tumor): label 3
         dice_ET = self.DiceFG((preds == 3), (masks == 3))
