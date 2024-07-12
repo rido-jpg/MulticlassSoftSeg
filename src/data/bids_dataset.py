@@ -37,6 +37,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Array of all MRI contrasts and the segmentation mask  
 contrasts = ['t1c', 't1n', 't2f', 't2w', 'seg']
+modalities = ['t1c', 't1n', 't2f', 't2w']
 
 # Keys of Dictionary that will be returned by the Dataset
 brats_keys = ['img', 'seg']
@@ -76,12 +77,12 @@ class BidsDataModule(pl.LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
 
 class BidsDataset(Dataset):
-    def __init__(self, root_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=False, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):
+    def __init__(self, data_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=False, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):
         """
         Parameters:
-        root_dir (str): The root directory containing subdirectories for each subject.
+        data_dir (str): The data directory containing subdirectories for each subject.
         prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
-        contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w'
+        contrast (str): type of mri contrast you want to use for the dataset, options: 't1c', 't1n', 't2f', 't2w', 'multimodal'
         suffix (str): The file extension of the MRI and segmentation files. Can be modified if we saved the files in different format than .nii.gz, e.g. in fast numpy io format "fnio" 
         do2D (bool): if True, use 2D slices of the MRI images and segmentation masks
         binary (bool): if True, convert segmentation mask to binary classification labels (tumor vs. non-tumor)
@@ -89,7 +90,7 @@ class BidsDataset(Dataset):
         resize (tuple): size of the image to be resized to
         """
 
-        self.root_dir = root_dir   
+        self.data_dir = data_dir   
         self.prefix = prefix     
         self.contrast = contrast
         self.suffix = suffix
@@ -112,7 +113,7 @@ class BidsDataset(Dataset):
             ]
         )
 
-        self.bids_list = create_bids_path_list_of_dicts(self.root_dir, prefix=self.prefix, suffix=self.suffix)
+        self.bids_list = create_bids_path_list_of_dicts(self.data_dir, prefix=self.prefix, suffix=self.suffix)
         
     def __len__(self):
         return len(self.bids_list)
@@ -121,60 +122,75 @@ class BidsDataset(Dataset):
         """"
         returns: dict with keys 'img' and 'seg' containing the MRI image and segmentation mask
         """
-        img_path = self.bids_list[idx][self.contrast]
+        # Loading segmentation mask
         mask_path = self.bids_list[idx][self.seg_key]
 
         # Load the MRI image and segmentation mask
         if self.suffix == 'fnio':
-            img = fnio.load(str(img_path))
             mask = fnio.load(str(mask_path))
 
         elif self.suffix == 'nii.gz':
-            img = load_nifti_as_array(str(img_path))
             mask = load_nifti_as_array(str(mask_path), True)
 
-        #print(f"\nStraight after loading: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
-
         mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type
-        
-        #print(f"\nAfter type conversion: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
-    
-        img = preprocess(img, False, self.binary)
         mask = preprocess(mask, True, self.binary)
 
-        #print(f"\nAfter preprocessing: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
 
+        #Loading multimodal stacked images
+        if self.contrast == 'multimodal':
+            imgs = []
+
+            # Load all modalities
+            for modality in modalities:
+                img_path = self.bids_list[idx][modality]
+
+                # Load the MRI image and segmentation mask
+                if self.suffix == 'fnio':
+                    img = fnio.load(str(img_path))
+
+                elif self.suffix == 'nii.gz':
+                    img = load_nifti_as_array(str(img_path))
+
+                img = preprocess(img, False, self.binary)
+                imgs.append(img)
+
+            img = torch.cat(imgs, dim=0)    # Stack the images along the channel dimension
+        
+
+        # Load a single modality
+        else:
+            img_path = self.bids_list[idx][self.contrast]
+
+            # Load the MRI image and segmentation mask
+            if self.suffix == 'fnio':
+                img = fnio.load(str(img_path))
+
+            elif self.suffix == 'nii.gz':
+                img = load_nifti_as_array(str(img_path))
+        
+            img = preprocess(img, False, self.binary)
+
+        # Create a dictionary with the MRI image and segmentation mask
         data_dict = {self.img_key: img, self.seg_key: mask}
 
         if self.transform:
             data_dict = self.transform(data_dict)
-        
-        #print(f"\nAfter transform: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")  
 
         data_dict = self.postprocess(data_dict) # padding and casting to tensor
 
-        #print(f"\nAfter postprocessing: \nimg.shape: {img.shape}, mask.shape: {mask.shape} \nimg.dtype: {img.dtype}, mask.dtype: {mask.dtype} \nmask.np.unique: {np.unique(mask)}")
-
-        # Slice and Pad
         if self.do2D:
+            # Adjust as get_central_slice() expects numpy array and preprocess() returns torch tensor
             data_dict[self.img_key] = get_central_slice(data_dict[self.img_key])
             data_dict[self.seg_key] = get_central_slice(data_dict[self.seg_key])
-            # data_dict[self.img_key] = slice_and_pad(data_dict[self.img_key], self.padding)
-            # data_dict[self.seg_key] = slice_and_pad(data_dict[self.seg_key], self.padding)
-
-
-        # logging.info(f"Loaded MRI image and segmentation mask for subject {self.bids_list[idx]['subject']}.")
-        # logging.info(f"img.dtype: {data_dict[self.img_key].dtype}, img.shape: {data_dict[self.img_key].shape}")
-        # logging.info(f"seg.dtype: {data_dict[self.seg_key].dtype}, seg.shape: {data_dict[self.seg_key].shape}")
         
         return data_dict
 
-def create_bids_path_list_of_dicts(root_dir:str, prefix:str="", suffix:str="nii.gz")->list:
+def create_bids_path_list_of_dicts(data_dir:str, prefix:str="", suffix:str="nii.gz")->list:
     """
     Scan the specified directory for MRI and segmentation files organized in a BIDS-like structure.
 
     Args:
-    root_dir (str): The root directory containing subdirectories for each subject.
+    data_dir (str): The data directory containing subdirectories for each subject.
 
     prefix (str): if all folders have the same prefix e.g. "BraTS-GLI-" you can add it to be excluded from the dict key
 
@@ -185,7 +201,7 @@ def create_bids_path_list_of_dicts(root_dir:str, prefix:str="", suffix:str="nii.
           dictionary with keys for each MRI type and the segmentation mask, containing their file paths.
     """
     list_of_path_dicts = []
-    root_path = Path(root_dir)
+    root_path = Path(data_dir)
 
     # Iterate through each directory in the root directory
     for folder_path in root_path.iterdir():
@@ -208,8 +224,8 @@ def create_bids_path_list_of_dicts(root_dir:str, prefix:str="", suffix:str="nii.
 
     return list_of_path_dicts
 
-def create_bids_array_list_of_dicts(root_dir:str, prefix:str= "") -> list: #  not needed anymore ?
-    list_of_path_dicts = create_bids_path_list_of_dicts(root_dir, prefix)
+def create_bids_array_list_of_dicts(data_dir:str, prefix:str= "") -> list: #  not needed anymore ?
+    list_of_path_dicts = create_bids_path_list_of_dicts(data_dir, prefix)
     list_of_array_dicts = []
 
     for subject_dict in list_of_path_dicts:
