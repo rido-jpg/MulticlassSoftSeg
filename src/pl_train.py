@@ -27,12 +27,16 @@ if __name__ == '__main__':
     # Set device automatically handled by PyTorch Lightning
     data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
     #data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/Sample-Subset'
-    in_channels = 1 # MRI scans are grayscale -> 1 channel
     n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
     out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
     img_key = brats_keys[0]
     do2D = False     # Use slices and 2D Unet or whole MRI and 3D Unet
-    contrast = 't1c'
+    contrast = 'multimodal'
+
+    if contrast == 'multimodal':
+        in_channels = 4
+    else:
+        in_channels = 1
 
     if n_classes == 2:
         binary = True
@@ -64,7 +68,7 @@ if __name__ == '__main__':
             RandShiftIntensityd(keys=img_key, offsets=0.1, prob=1.0),
         ]
     )
-    #augmentations = None
+    augmentations = None
 
     model = LitUNetModule(
         in_channels = in_channels,
@@ -85,7 +89,7 @@ if __name__ == '__main__':
         contrast = contrast,
         do2D = do2D,
         binary = binary,
-        batch_size = batch_size,‚‚
+        batch_size = batch_size,
         train_transform = augmentations,
         resize = resize,
         test_transform=None,
@@ -131,7 +135,7 @@ if __name__ == '__main__':
     # Learning rate monitor
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    # Trainer handles training loop
+    # Trainer handles training loops∫s∫
     trainer = pl.Trainer(
         #fast_dev_run=True,
         max_epochs=max_epochs, 
