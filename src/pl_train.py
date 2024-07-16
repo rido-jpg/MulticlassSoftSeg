@@ -29,9 +29,9 @@ def parse_train_param(parser=None):
         parser = argparse.ArgumentParser()
 
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
-    parser.add_argument("-n_epochs", type=int, default=150, help="Number of epochs")
+    parser.add_argument("-epochs", type=int, default=150, help="Number of epochs")
     parser.add_argument("-n_cpu", type=int, default=19, help="Number of cpu workers")
-    parser.add_argument("-n_groups", type=int, default=8, help="Number of groups for group normalization")
+    parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
     parser.add_argument("-n_accum_grad_batch", type=int, default=4, help="Number of batches to accumulate gradient over")
     #
@@ -110,11 +110,12 @@ if __name__ == '__main__':
     augmentations = None
 
     model = LitUNetModule(
+        conf = opt,
         in_channels = in_channels,
         out_channels = out_channels,
-        epochs = opt.n_epochs,
+        epochs = opt.epochs,
         dim = opt.dim,
-        groups = opt.n_groups,
+        groups = opt.groups,
         do2D = opt.do2D,
         binary= binary, 
         start_lr = opt.lr,
@@ -143,9 +144,9 @@ if __name__ == '__main__':
 
     
     if augmentations == None:
-        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.n_epochs}_dimUNet_{opt.dim}_binary:{binary}_no_augmentations")
+        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_no_augmentations")
     else:
-        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.n_epochs}_dimUNet_{opt.dim}_binary:{binary}_with_augmentations")
+        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_with_augmentations")
 
     #suffix = suffix + "_DEBUGGING_RUN"
 
@@ -176,10 +177,10 @@ if __name__ == '__main__':
     # Learning rate monitor
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    # Trainer handles training loops∫s∫
+    # Trainer handles training loops
     trainer = pl.Trainer(
         fast_dev_run=opt.test_run,
-        max_epochs=opt.n_epochs, 
+        max_epochs=opt.epochs, 
         default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs', 
         log_every_n_steps=10, 
         accelerator='auto',
