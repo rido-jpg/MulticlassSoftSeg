@@ -6,7 +6,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor
 from pl_unet import LitUNetModule
 from data.bids_dataset import BidsDataModule, brats_keys
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint
 from monai.transforms import (
     Compose,
     RandAdjustContrastd,
@@ -66,6 +66,61 @@ def get_option(opt: Namespace, attr: str, default, dtype: type = None):
 
     # option does not exist, return default
     return default
+
+#def get_trainer_callbacks(train_loader, opt, bestf1: bool = True):
+def get_trainer_callbacks(bestf1: bool = True):
+    callbacks = []
+
+    # Define save best 5 checkpoints
+    mc_best = ModelCheckpoint(
+        filename="epoch={epoch}-step={step}-train_loss={loss/train_loss:.4f}_train-best",
+        monitor="loss/train_loss",
+        mode="min",
+        save_top_k=2,
+        save_weights_only=True,
+        verbose=False,
+        save_on_train_epoch_end=True,
+        auto_insert_metric_name=False,
+    )
+    mc_valbest = ModelCheckpoint(
+        filename="epoch={epoch}-step={step}-val_loss={loss/val_loss:.4f}_val-best",
+        monitor="loss/val_loss",
+        mode="min",
+        save_top_k=2,
+        save_weights_only=True,
+        verbose=False,
+        save_on_train_epoch_end=True,
+        auto_insert_metric_name=False,
+    )
+    callbacks.append(mc_best)
+    callbacks.append(mc_valbest)
+    if bestf1:
+        mc_valbestweights = ModelCheckpoint(
+            filename="epoch={epoch}-step={step}-val_diceFG={diceFG/val_diceFG:.4f}_valdiceFG-weights",
+            monitor="diceFG/val_diceFG",
+            mode="max",
+            save_top_k=2,
+            save_weights_only=True,
+            verbose=False,
+            save_on_train_epoch_end=True,
+            auto_insert_metric_name=False,
+        )
+        callbacks.append(mc_valbestweights)
+
+    # Save latest two checkpoints for safety
+    mc_last = ModelCheckpoint(
+        filename="epoch={epoch}-step={step}-train_loss={loss/train_loss:.4f}_latest",
+        monitor="step",
+        mode="max",
+        #every_n_train_steps=min(200, len(train_loader)),   # train_loader is not available directly when working with DataModule
+        every_n_train_steps=200,                             #hardcoded for now, fix later
+        save_top_k=2,
+        auto_insert_metric_name=False,
+    )
+    callbacks.append(mc_last)
+
+    assert len(callbacks) > 0, "no callbacks defined"
+    return callbacks
 
 
 if __name__ == '__main__':
@@ -174,8 +229,14 @@ if __name__ == '__main__':
     #profiler = pl.profilers.AdvancedProfiler(dirpath=dirpath, filename='profiler_logs')
     profiler = pl.profilers.SimpleProfiler(dirpath=dirpath, filename='performance_logs')
 
+    # Checkpoint callback
+    callbacks = get_trainer_callbacks()
+
     # Learning rate monitor
     lr_monitor = LearningRateMonitor(logging_interval='step')
+
+    # Callbacks
+    callbacks.append(lr_monitor)
 
     # Trainer handles training loops
     trainer = pl.Trainer(
@@ -185,7 +246,7 @@ if __name__ == '__main__':
         log_every_n_steps=10, 
         accelerator='auto',
         logger=logger,
-        callbacks=lr_monitor, 
+        callbacks=callbacks, 
         #profiler=profiler,
         profiler='simple',
         accumulate_grad_batches=opt.n_accum_grad_batch,
