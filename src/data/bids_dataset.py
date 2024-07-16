@@ -50,7 +50,7 @@ brats_keys = ['img', 'seg']
 # )
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=True, binary:bool=True, train_transform=None, test_transform=None, resize:tuple[int, int, int]=(200, 200, 152), batch_size:int=2):
+    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=False, binary:bool=False, train_transform=None, test_transform=None, resize:tuple[int, int, int]=(200, 200, 152), batch_size:int=2, n_workers:int=16):
         super().__init__()
         self.data_dir = data_dir
         self.contrast = contrast
@@ -61,6 +61,7 @@ class BidsDataModule(pl.LightningDataModule):
         self.batch_size = batch_size 
         self.train_transform = train_transform   
         self.test_transform = test_transform
+        self.n_workers = n_workers
 
     def setup(self, stage: str = None) -> None:
         self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.train_transform,resize=self.resize)
@@ -68,13 +69,13 @@ class BidsDataModule(pl.LightningDataModule):
         self.test_dataset = BidsDataset(self.data_dir + '/test', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,resize=self.resize)
         
     def train_dataloader(self) -> torch.Any:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=19)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers)
     
     def val_dataloader(self) -> torch.Any:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers)
 
     def test_dataloader(self) -> torch.Any:
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=19)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers)
 
 class BidsDataset(Dataset):
     def __init__(self, data_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=True, binary:bool=False, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):

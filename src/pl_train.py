@@ -1,5 +1,7 @@
 import os
+import argparse
 import lightning.pytorch as pl
+from argparse import Namespace
 from lightning.pytorch.callbacks import LearningRateMonitor
 from pl_unet import LitUNetModule
 from data.bids_dataset import BidsDataModule, brats_keys
@@ -22,18 +24,66 @@ import numpy as np
 import torch
 import math
 
+def parse_train_param(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+
+    parser.add_argument("-bs", type=int, default=1, help="Batch size")
+    parser.add_argument("-epochs", type=int, default=150, help="Number of epochs")
+    parser.add_argument("-n_cpu", type=int, default=19, help="Number of cpu workers")
+    parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
+    parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
+    parser.add_argument("-n_accum_grad_batch", type=int, default=4, help="Number of batches to accumulate gradient over")
+    #
+    # action=store_true means that if the argument is present, it will be set to True, otherwise False
+    parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
+    #
+    parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
+    parser.add_argument("-resize", type=tuple, default=(200, 200, 152), help="Resize the input images to this size")
+    parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
+    #
+    parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
+    parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
+    parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
+    parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
+    #
+    # action=store_true means that if the argument is present, it will be set to True, otherwise False
+    parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size and sample size")
+    parser.add_argument("-suffix", type=str, default="", help="Sets a setup name suffix for easier identification")
+    #parser.add_argument("-gpus", type=int, default=[0], nargs="+", help="Which GPU indices are used")
+    return parser
+
+def get_option(opt: Namespace, attr: str, default, dtype: type = None):
+    # option exists
+    if opt is not None and hasattr(opt, attr):
+        option = getattr(opt, attr)
+        # dtype is given, cast to it
+        if dtype is not None:
+            if dtype == bool and isinstance(option, str):
+                option = option in ["true", "True", "1"]
+            return dtype(option)
+        return option
+
+    # option does not exist, return default
+    return default
+
 
 if __name__ == '__main__':
+
+    parser = parse_train_param()
+    opt = parser.parse_args()
+    print("Train with arguments")
+    print(opt)
+    print()
+
     # Set device automatically handled by PyTorch Lightning
     data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
     #data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/Sample-Subset'
     n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
     out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
     img_key = brats_keys[0]
-    do2D = False     # Use slices and 2D Unet or whole MRI and 3D Unet
-    contrast = 'multimodal'
 
-    if contrast == 'multimodal':
+    if opt.contrast == 'multimodal':
         in_channels = 4
     else:
         in_channels = 1
@@ -43,17 +93,6 @@ if __name__ == '__main__':
     else:
         binary = False
 
-    # Hyperparameters
-    start_lr = 0.0001   # starting learning rate
-    lr_end_factor = 0.01 # factor to reduce learning rate to at the end of training
-    l2_reg_w = 0.001    # weight for L2 regularization
-    dsc_loss_w = 1.0    # weight for Dice loss
-    batch_size = 1     # batch size
-    max_epochs = 800    # number of epochs to train
-    dim = 16    # number of filters in the first layer (has to be divisible by number of groups)
-    groups = 8  # number of groups for group normalization 
-    resize = (200, 200, 152) # resize the input images to this size
-    accumulate_grad_batches = 4
 
     augmentations = Compose(
         [   
@@ -71,40 +110,43 @@ if __name__ == '__main__':
     augmentations = None
 
     model = LitUNetModule(
+        conf = opt,
         in_channels = in_channels,
         out_channels = out_channels,
-        dim = dim,
-        groups = groups,
-        do2D = do2D,
+        epochs = opt.epochs,
+        dim = opt.dim,
+        groups = opt.groups,
+        do2D = opt.do2D,
         binary= binary, 
-        start_lr = start_lr,
-        lr_end_factor = lr_end_factor,
+        start_lr = opt.lr,
+        lr_end_factor = opt.lr_end_factor,
         n_classes = n_classes,
-        l2_reg_w = l2_reg_w,
-        epochs = max_epochs,
+        l2_reg_w = opt.l2_reg_w,
+        dsc_loss_w = opt.dsc_loss_w,
     )  
 
     data_module = BidsDataModule(
         data_dir = data_dir,
-        contrast = contrast,
-        do2D = do2D,
+        contrast = opt.contrast,
+        do2D = opt.do2D,
         binary = binary,
-        batch_size = batch_size,
+        batch_size = opt.bs,
         train_transform = augmentations,
-        resize = resize,
+        resize = opt.resize,
         test_transform=None,
+        n_workers=opt.n_cpu,
     )
     
-    if do2D:
+    if opt.do2D:
         model_name='2D_UNet'
     else:
         model_name='3D_UNet'
 
     
     if augmentations == None:
-        suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_dimUNet_{dim}_binary:{binary}_no_augmentations")
+        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_no_augmentations")
     else:
-        suffix = str(f"_batch_size_{batch_size}_n_epochs_{max_epochs}_dimUNet_{dim}_binary:{binary}_with_augmentations")
+        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_with_augmentations")
 
     #suffix = suffix + "_DEBUGGING_RUN"
 
@@ -123,7 +165,7 @@ if __name__ == '__main__':
     logger = TensorBoardLogger(
         save_dir=str(filepath_logs),
         name=model_name,
-        version=str(f"{model_name}_v{version}_lr{start_lr}{suffix}"), # naming is a bit wack, improve later
+        version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}_{opt.suffix}"), # naming is a bit wack, improve later
         default_hp_metric=False,
     )
 
@@ -135,18 +177,18 @@ if __name__ == '__main__':
     # Learning rate monitor
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    # Trainer handles training loops∫s∫
+    # Trainer handles training loops
     trainer = pl.Trainer(
-        #fast_dev_run=True,
-        max_epochs=max_epochs, 
+        fast_dev_run=opt.test_run,
+        max_epochs=opt.epochs, 
         default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs', 
         log_every_n_steps=10, 
         accelerator='auto',
         logger=logger,
-        callbacks=lr_monitor,
+        callbacks=lr_monitor, 
         #profiler=profiler,
         profiler='simple',
-        accumulate_grad_batches=accumulate_grad_batches,
+        accumulate_grad_batches=opt.n_accum_grad_batch,
     )
 
 
