@@ -36,7 +36,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-n_accum_grad_batch", type=int, default=4, help="Number of batches to accumulate gradient over")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
-    parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
+    #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
     #
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
     parser.add_argument("-resize", type=tuple, default=(200, 200, 152), help="Resize the input images to this size")
@@ -49,6 +49,7 @@ def parse_train_param(parser=None):
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size and sample size")
+    parser.add_argument("-no_augmentations", action="store_true", default=False, help="No augmentations during training")
     parser.add_argument("-suffix", type=str, default="", help="Sets a setup name suffix for easier identification")
     #parser.add_argument("-gpus", type=int, default=[0], nargs="+", help="Which GPU indices are used")
     return parser
@@ -152,17 +153,19 @@ if __name__ == '__main__':
     augmentations = Compose(
         [   
             #RandAdjustContrastd(keys=img_key, prob=0.8, gamma=(0.7,1.5)),
-            #RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.75,keep_size=True, mode =["bilinear", "nearest"]),
+            RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
             #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
-            #RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
+            RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
             RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
             RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=1),
             RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=2),
-            RandScaleIntensityd(keys=img_key, factors=0.1, prob=1.0),
-            RandShiftIntensityd(keys=img_key, offsets=0.1, prob=1.0),
+            #RandScaleIntensityd(keys=img_key, factors=0.1, prob=1.0),
+            #RandShiftIntensityd(keys=img_key, offsets=0.1, prob=1.0),
         ]
     )
-    augmentations = None
+
+    if opt.no_augmentations:
+        augmentations = None
 
     model = LitUNetModule(
         conf = opt,
