@@ -30,7 +30,7 @@ def parse_train_param(parser=None):
 
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
     parser.add_argument("-epochs", type=int, default=150, help="Number of epochs")
-    parser.add_argument("-n_cpu", type=int, default=19, help="Number of cpu workers")
+    parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
     parser.add_argument("-n_accum_grad_batch", type=int, default=4, help="Number of batches to accumulate gradient over")
