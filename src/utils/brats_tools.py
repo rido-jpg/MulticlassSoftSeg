@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
-def plot_slices(mri_slice, seg_slice, plt_title:str , omit_background=True, show=True, save_path=None):
+def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None):
     # Create a masked array where only values 1, 2, and 3 are included
     # and other values are set to be transparent
     mask = np.isin(seg_slice, [1, 2, 3])
