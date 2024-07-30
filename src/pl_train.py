@@ -39,7 +39,7 @@ def parse_train_param(parser=None):
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
     #
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
-    parser.add_argument("-resize", type=tuple, default=(200, 200, 152), help="Resize the input images to this size")
+    parser.add_argument("-resize", type=int, nargs= "+", default=(152, 200, 160), help="Resize the input images to this size (divisible by 8)")
     parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
@@ -152,7 +152,7 @@ if __name__ == '__main__':
 
     augmentations = Compose(
         [   
-            #RandAdjustContrastd(keys=img_key, prob=0.8, gamma=(0.7,1.5)),
+            RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
             RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
             #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
             RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
@@ -190,7 +190,7 @@ if __name__ == '__main__':
         binary = binary,
         batch_size = opt.bs,
         train_transform = augmentations,
-        resize = opt.resize,
+        resize = tuple(opt.resize),
         test_transform=None,
         n_workers=opt.n_cpu,
     )
