@@ -34,26 +34,21 @@ def get_option(opt: Namespace, attr: str, default, dtype: type = None):
     # option does not exist, return default
     return default
 
-# load model checkpoint
-checkpoint_path = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/3D_UNet/3D_UNet_v11_lr0.0001_batch_size_1_n_epochs_400_dimUNet_16_binary:False_with_augmentations_/checkpoints/epoch=157-step=34602-val_diceFG=0.8174_valdiceFG-weights.ckpt'
+
+### RUN SPECIFIC CONFIGURATION ###
+checkpoint_path = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/3D_UNet/3D_UNet_v11_lr0.0001_batch_size_1_n_epochs_400_dimUNet_16_binary:False_with_augmentations_/checkpoints/epoch=372-step=81687-val_diceFG=0.8407_valdiceFG-weights.ckpt'
+data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val'
+suffix = "3D_UNet_v11"  # suffix for saved files
+save_gts = False        # GTs should only need to be saved once
+test_loop = True        # test loop with single sample for debugging
+format = 'fnio'         # format of the data
+
 
 # load hparams from checkpoint to get contrast
 hparams = LitUNetModule.load_from_checkpoint(checkpoint_path).hparams
 conf = hparams.get('conf')
 contrast = get_option(conf, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
 
-# optional suffix to denote predictions of certain model etc
-suffix = "3D_UNet_v11"
-
-# # ckpt of best run
-# checkpoint_path = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/3D_UNet/3D_UNet_v8_lr0.0001_batch_size_1_n_epochs_800_dimUNet_16_binary:False_no_augmentations/checkpoints/epoch=177-step=38982.ckpt'
-# hparams = LitUNetModule.load_from_checkpoint(checkpoint_path).hparams
-# conf = hparams.get('conf')
-# contrast = 'multimodal'
-# suffix = "3D_UNet_v8_no_augmentations"
-
-# choose base path for validation set
-data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val'
 
 model_input_size = get_option(conf, 'resize', [200, 200, 152])
 
@@ -80,7 +75,7 @@ if __name__ == '__main__':
     model.eval()
 
     # create BidsDataset instance
-    bids_val_ds = BidsDataset(data_dir, contrast=contrast, suffix = 'nii.gz', resize=model_input_size)
+    bids_val_ds = BidsDataset(data_dir, contrast=contrast, suffix=format, resize=model_input_size)
 
     for idx, dicts in enumerate(bids_val_ds):
         img = dicts['img']
@@ -92,7 +87,7 @@ if __name__ == '__main__':
 
         base_path = data_dir + '/' + subject + '/' + subject
 
-        # add batch dimension, in this case 1 bcecause our batch size is 1
+        # add batch dimension, in this case 1 because our batch size is 1
         img_tensor = img.unsqueeze(0)
 
         # ensure img_tensor is on same device as trained_model
@@ -114,7 +109,7 @@ if __name__ == '__main__':
 
         preds_array = preds_array.astype(np.uint8) # ensure correct type to be able to cast it to a NII object
 
-        # load segmentation as NII object 
+        # load GT segmentation as NII object 
         seg_path = base_path + '-seg.nii.gz'
         seg = NII.load(seg_path, seg=True)
 
@@ -126,14 +121,23 @@ if __name__ == '__main__':
         difference_nifti = NII.get_segmentation_difference_to(pred_nii, seg, ignore_background_tp=True)
         difference_nifti.save(base_path + "-seg-difference-" + suffix + ".nii.gz")
 
-        gt_slice = get_central_slice(seg.get_array()) # get central slice of ground truth
+        if save_gts:
+            gt_slice = get_central_slice(seg.get_array()) # get central slice of ground truth
+
         pred_slice = get_central_slice(preds_array) # get central slice of prediction
 
         for contrast in modalities:
-            full_img = NII.load(bids_val_ds.bids_list[idx][contrast], seg=False)
-            img_array = full_img.get_array()
+            if format == 'nii.gz':
+                full_img = NII.load(bids_val_ds.bids_list[idx][contrast], seg=False)
+                img_array = full_img.get_array()
+            elif format == 'fnio':
+                img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
+
             img_slice = get_central_slice(img_array)
-            plot_slices(img_slice, pred_slice, save_path=base_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
-            plot_slices(img_slice, gt_slice, save_path=base_path + f"-{contrast}-slice-gt.png", show = False)
-        # for testing purposes -> exit after one iteration
-        #break
+            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path=base_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
+            if save_gts:
+                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=base_path + f"-{contrast}-slice-gt.png", show = False)
+
+        if test_loop:     
+            # for testing purposes -> exit after one iteration
+            break
