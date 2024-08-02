@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
-def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None):
+def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet'):
     # Create a masked array where only values 1, 2, and 3 are included
     # and other values are set to be transparent
     mask = np.isin(seg_slice, [1, 2, 3])
@@ -11,8 +11,8 @@ def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, s
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
 
-    ax[0].imshow(mri_slice.T, cmap='gray', origin='lower')
-    ax[1].imshow(mri_slice.T, cmap='gray', origin='lower')
+    ax[0].imshow(mri_slice.T, cmap=cmap_mri, origin='lower')
+    ax[1].imshow(mri_slice.T, cmap=cmap_mri, origin='lower')
 
     # Give Titles to the plots
     ax[0].set_title('MRI Slice')
@@ -23,9 +23,9 @@ def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, s
 
     if omit_background==True:
         # Only overlay areas where mask is True, with the segmentation mask using a colormap
-        ax[1].imshow(masked_seg_slice.T, cmap='jet', alpha=0.5, origin='lower')
+        ax[1].imshow(masked_seg_slice.T, cmap=cmap_seg, alpha=0.5, origin='lower')
     else:
-        ax[1].imshow(seg_slice.T, cmap='jet', alpha = 0.5, origin='lower')      #Overlay with transparency
+        ax[1].imshow(seg_slice.T, cmap=cmap_seg, alpha = 0.5, origin='lower')      #Overlay with transparency
 
     if save_path:
         plt.savefig(save_path)  # Save the figure to the specified path
@@ -72,18 +72,33 @@ def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
     Returns:
         numpy.ndarray: The central slice as a NumPy array.
     """
-    # Determine the slice index
-    slice_index = nifti_np_array.shape[axis] // 2
-    
-    # Extract the central slice based on the axis
-    if axis == 0:
-        slice_data = nifti_np_array[slice_index, :, :]
-    elif axis == 1:
-        slice_data = nifti_np_array[:, slice_index, :]
-    elif axis == 2:
-        slice_data = nifti_np_array[:, :, slice_index]
-    else:
-        raise ValueError("Invalid axis. Axis must be 0, 1, or 2.")
+    # check if the input is a tensor
+    if nifti_np_array.dim() == 3:
+        # Determine the slice index
+        slice_index = nifti_np_array.shape[axis] // 2
+        
+        # Extract the central slice based on the axis
+        if axis == 0:
+            slice_data = nifti_np_array[slice_index, :, :]
+        elif axis == 1:
+            slice_data = nifti_np_array[:, slice_index, :]
+        elif axis == 2:
+            slice_data = nifti_np_array[:, :, slice_index]
+        else:
+            raise ValueError("Invalid axis. Axis must be 0, 1, or 2.")
+    elif nifti_np_array.dim() == 4:
+        # Determine the slice index
+        slice_index = nifti_np_array.shape[axis+1] // 2
+
+        # Extract the central slice based on the axis
+        if axis == 0:
+            slice_data = nifti_np_array[: ,slice_index, :, :]
+        elif axis == 1:
+            slice_data = nifti_np_array[:,:, slice_index, :]
+        elif axis == 2:
+            slice_data = nifti_np_array[:, :, :, slice_index]
+        else:
+            raise ValueError("Invalid axis. Axis must be 0, 1, or 2.")
 
     return slice_data    
 
