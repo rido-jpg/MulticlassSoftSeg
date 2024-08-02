@@ -33,13 +33,13 @@ def parse_train_param(parser=None):
     parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
-    parser.add_argument("-n_accum_grad_batch", type=int, default=4, help="Number of batches to accumulate gradient over")
+    parser.add_argument("-n_accum_grad_batch", type=int, default=1, help="Number of batches to accumulate gradient over")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
     #
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
-    parser.add_argument("-resize", type=int, nargs= "+", default=(152, 200, 160), help="Resize the input images to this size (divisible by 8)")
+    parser.add_argument("-resize", type=int, nargs= "+", default=(152, 192, 144), help="Resize the input images to this size (divisible by 8)")
     parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
@@ -152,7 +152,7 @@ if __name__ == '__main__':
 
     augmentations = Compose(
         [   
-            RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
+            #RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
             RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
             #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
             RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
