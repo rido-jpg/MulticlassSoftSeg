@@ -41,6 +41,8 @@ def parse_train_param(parser=None):
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
     parser.add_argument("-resize", type=int, nargs= "+", default=(152, 192, 144), help="Resize the input images to this size (divisible by 8)")
     parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
+    parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks for training")
+    parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
@@ -175,7 +177,9 @@ if __name__ == '__main__':
         dim = opt.dim,
         groups = opt.groups,
         do2D = opt.do2D,
-        binary= binary, 
+        binary= binary,
+        soft = opt.soft,
+        one_hot = opt.one_hot,
         start_lr = opt.lr,
         lr_end_factor = opt.lr_end_factor,
         n_classes = n_classes,
@@ -188,6 +192,8 @@ if __name__ == '__main__':
         contrast = opt.contrast,
         do2D = opt.do2D,
         binary = binary,
+        soft = opt.soft,
+        one_hot = opt.one_hot,
         batch_size = opt.bs,
         train_transform = augmentations,
         resize = tuple(opt.resize),
@@ -195,18 +201,29 @@ if __name__ == '__main__':
         n_workers=opt.n_cpu,
     )
     
+    ## Set up Model Name
+    model_name='3D_UNet'
+    n_aug = str("_with_augmentations")  # augmentations
+    n_oh = str("")                      # one-hot encoding
+    n_soft = str("")                    # soft segmentation
+    n_bin = str("")                     # binary segmentation
+
     if opt.do2D:
         model_name='2D_UNet'
-    else:
-        model_name='3D_UNet'
-
-    
+        
     if augmentations == None:
-        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_no_augmentations")
-    else:
-        suffix = str(f"_batch_size_{opt.bs}_n_epochs_{opt.epochs}_dimUNet_{opt.dim}_binary:{binary}_with_augmentations")
+        n_aug = str("_no_augmentations")
+        
+    if opt.one_hot:
+        n_oh = str("_one_hot")
 
-    #suffix = suffix + "_DEBUGGING_RUN"
+    if opt.soft:
+        n_soft = str("_soft")
+
+    if binary:
+        n_bin = str("_binary")
+
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dimUNet_{opt.dim}{n_bin}{n_oh}{n_soft}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
