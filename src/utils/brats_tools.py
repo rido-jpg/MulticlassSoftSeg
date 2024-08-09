@@ -102,7 +102,22 @@ def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
 
     return slice_data    
 
-def preprocess(img:np.array, seg:bool, binary:bool) -> torch.Tensor:
+def preprocess(img:np.array, seg:bool, binary:bool, one_hot:bool, n_classes:int) -> torch.Tensor:
+    '''
+    Preprocess the MRI image and segmentation mask.
+    1. Z-Standardize the MRI intensity values
+    2. Depending on config convert the segmentation mask to binary classification labels (tumor vs. non-tumor)
+    3. Add Channel dimension to achieve desired shape [C, H, W, D] where C=1
+    4. Convert numpy arrays to PyTorch tensors (float for MRI, long for segmentation mask)
+
+    Parameters:
+        img (np.array): MRI image or segmentation mask
+        seg (bool): True if the input is a segmentation mask
+        binary (bool): True if the segmentation mask should be converted to binary labels
+        one_hot (bool): True if the segmentation mask should be converted to one-hot encoded labels
+        n_classes (int): Number of classes in the segmentation mask
+    
+    '''
     #Normalize the MRI image
     if not seg:
         img = normalize(img)
@@ -112,23 +127,27 @@ def preprocess(img:np.array, seg:bool, binary:bool) -> torch.Tensor:
         img[img > 0] = 1
 
     # Convert numpy arrays to PyTorch tensors
-    img = torch.from_numpy(img)
-
-    # # Add a channel dimension if it's missing
-    # if img.ndim == 2:  # if the image is 2D
-    #     img = img.unsqueeze(0)
-    # elif img.ndim == 3:  # if the image is 3D
-    #     img = img.unsqueeze(0)
-
-    img = img.unsqueeze(0)  # add a channel dimension
+    img_tensor = torch.from_numpy(img.copy())
+    # img_tensor = torch.tensor(img) 
+    """
+    UserWarning: The given NumPy array is not writable, and PyTorch does
+    not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make
+    it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /opt/conda/conda-bld
+    /pytorch_1712608853085/work/torch/csrc/utils/tensor_numpy.cpp:206.)
+    """
 
     # Ensure the image is in the correct type
     if not seg:
-        img = img.float()
+        img_tensor = img_tensor.float()
     else:
-        img = img.long()
+        img_tensor = img_tensor.long()
 
-    return img
+    if one_hot and seg:
+        img_tensor = F.one_hot(img_tensor, num_classes=n_classes).permute(3, 0, 1, 2) #one-hot encode and permute to [C, H, W, D]
+    else:
+        img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
+        
+    return img_tensor
 
 def slice_and_pad(img:torch.Tensor, padding:tuple[int, int]|tuple[int, int, int]) -> torch.Tensor:
     # Get a 2D slice
