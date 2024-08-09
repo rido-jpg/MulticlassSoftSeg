@@ -20,13 +20,15 @@ from monai.metrics import DiceMetric, compute_average_surface_distance
 
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0, conf=None):
+    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0, conf=None):
         super(LitUNetModule, self).__init__()
 
         self.save_hyperparameters()
 
         self.do2D = do2D
         self.binary = binary
+        self.soft = soft
+        self.one_hot = one_hot
 
         self.start_lr = start_lr
         self.linear_end_factor = lr_end_factor
@@ -190,7 +192,10 @@ class LitUNetModule(pl.LightningModule):
         return {"optimizer": optimizer}
         
     def loss(self, logits, preds, masks):
-        masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
+        if self.one_hot:
+            masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks back to integer masks
+        else:
+            masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
 
         ce_loss = self.CEL(logits, masks)
 
@@ -246,6 +251,9 @@ class LitUNetModule(pl.LightningModule):
         return losses, logits, masks, preds
     
     def _shared_metric_step(self, loss, logits, masks, preds):
+        if self.one_hot:
+            masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks to integer masks
+
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
