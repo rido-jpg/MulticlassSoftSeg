@@ -48,6 +48,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
     parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
     parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
+    parser.add_argument("-sigma", type=float, default=0.1, help="Sigma for Gaussian Noise")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size and sample size")
@@ -130,6 +131,10 @@ if __name__ == '__main__':
 
     parser = parse_train_param()
     opt = parser.parse_args()
+
+    if opt.soft:
+        opt.one_hot = True
+
     print("Train with arguments")
     print(opt)
     print()
@@ -207,6 +212,8 @@ if __name__ == '__main__':
     n_oh = str("")                      # one-hot encoding
     n_soft = str("")                    # soft segmentation
     n_bin = str("")                     # binary segmentation
+    n_sigma = str("")                   # sigma for Gaussian Noise
+    n_grad_accum = str("")              # gradient accumulation
 
     if opt.do2D:
         model_name='2D_UNet'
@@ -219,11 +226,16 @@ if __name__ == '__main__':
 
     if opt.soft:
         n_soft = str("_soft")
+        n_sigma = str(f"_sigma_{opt.sigma}")
 
     if binary:
         n_bin = str("_binary")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dimUNet_{opt.dim}{n_bin}{n_oh}{n_soft}{n_aug}")
+    if opt.n_accum_grad_batch > 1:
+        n_grad_accum = str(f"_grad_accum_{opt.n_accum_grad_batch}")
+
+
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dimUNet_{opt.dim}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
