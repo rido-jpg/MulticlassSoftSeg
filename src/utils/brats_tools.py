@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+import scipy.ndimage
 
 def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet'):
     # Create a masked array where only values 1, 2, and 3 are included
@@ -184,3 +185,20 @@ def normalize(nifti_array:np.ndarray) -> np.ndarray:
         raise ValueError("Standard deviation of the masked elements is zero, normalization cannot be performed.")
     
     return normalized_array
+
+def soften_gt(gt:torch.Tensor, sigma:float=1.0) -> torch.Tensor:
+    '''
+    Soften the ground truth segmentation mask using a Gaussian kernel.
+    Parameters:
+        gt (torch.Tensor): Ground truth segmentation mask in one-hot encoded format [C, H, W, D]
+        sigma (float): Standard deviation of the Gaussian kernel
+    Returns:
+        torch.Tensor: Softened segmentation mask in [C, H, W, D] format
+    '''
+    # Apply Gaussian filter to each channel
+    filtered_gt = torch.empty_like(gt, dtype=torch.float32)  # Create an empty tensor to store the results
+
+    for i in range(filtered_gt.shape[0]):  # Loop through each class channel
+        filtered_gt[i] = torch.tensor(scipy.ndimage.gaussian_filter(gt[i].numpy().astype(float), sigma=sigma))
+    
+    return filtered_gt
