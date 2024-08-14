@@ -185,6 +185,7 @@ if __name__ == '__main__':
         binary= binary,
         soft = opt.soft,
         one_hot = opt.one_hot,
+        sigma = opt.sigma,
         start_lr = opt.lr,
         lr_end_factor = opt.lr_end_factor,
         n_classes = n_classes,
@@ -252,7 +253,7 @@ if __name__ == '__main__':
     logger = TensorBoardLogger(
         save_dir=str(filepath_logs),
         name=model_name,
-        version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}_{opt.suffix}"), # naming is a bit wack, improve later
+        version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
         default_hp_metric=False,
     )
 
