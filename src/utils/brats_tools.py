@@ -143,11 +143,13 @@ def preprocess(img:np.array, seg:bool, binary:bool, one_hot:bool, n_classes:int)
     else:
         img_tensor = img_tensor.long()
 
-    if one_hot and seg:
-        img_tensor = F.one_hot(img_tensor, num_classes=n_classes).permute(3, 0, 1, 2) #one-hot encode and permute to [C, H, W, D]
-    else:
-        img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
-        
+    # if one_hot and seg:
+    #     img_tensor = F.one_hot(img_tensor, num_classes=n_classes).permute(3, 0, 1, 2) #one-hot encode and permute to [C, H, W, D]
+    # else:
+    #     img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
+
+    img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
+
     return img_tensor
 
 def slice_and_pad(img:torch.Tensor, padding:tuple[int, int]|tuple[int, int, int]) -> torch.Tensor:
