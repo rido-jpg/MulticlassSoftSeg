@@ -143,8 +143,8 @@ class BidsDataset(Dataset):
         #DOES THE LINE ABOVE REALLY DO ANYTHING? IN PREPROCESS() WE CONVERT IT TO LONG ANYWAY
         mask = preprocess(mask, seg=True, binary=self.binary, one_hot=self.one_hot, n_classes=self.n_classes)
 
-        if self.soft:
-            mask = soften_gt(mask, sigma=self.sigma)
+        # if self.soft:
+        #     mask = soften_gt(mask, sigma=self.sigma)
 
         #Loading multimodal stacked images
         if self.contrast == 'multimodal':
