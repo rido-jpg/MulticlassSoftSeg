@@ -29,7 +29,7 @@ def parse_train_param(parser=None):
         parser = argparse.ArgumentParser()
 
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
-    parser.add_argument("-epochs", type=int, default=150, help="Number of epochs")
+    parser.add_argument("-epochs", type=int, default=400, help="Number of epochs")
     parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
@@ -43,12 +43,15 @@ def parse_train_param(parser=None):
     parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
+    parser.add_argument("-dilation", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
     parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
     parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
-    parser.add_argument("-sigma", type=float, default=0.1, help="Sigma for Gaussian Noise")
+    parser.add_argument("-ce_loss_w", type=float, default=1.0, help="Cross Entropy Loss Weight Factor")
+    parser.add_argument("-soft_loss_w", type=float, default=0.0, help="Soft Loss Weight Factor")
+    parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size and sample size")
@@ -129,11 +132,16 @@ def get_trainer_callbacks(bestf1: bool = True):
 
 if __name__ == '__main__':
 
+    pl.seed_everything(42)
+
     parser = parse_train_param()
     opt = parser.parse_args()
 
     if opt.soft:
         opt.one_hot = True
+        opt.soft_loss_w = 1.0
+        opt.ce_loss_w = 0.0
+        opt.dsc_loss_w = 0.0
 
     print("Train with arguments")
     print(opt)
@@ -191,6 +199,8 @@ if __name__ == '__main__':
         n_classes = n_classes,
         l2_reg_w = opt.l2_reg_w,
         dsc_loss_w = opt.dsc_loss_w,
+        ce_loss_w = opt.ce_loss_w,
+        soft_loss_w = opt.soft_loss_w
     )  
 
     data_module = BidsDataModule(
@@ -209,8 +219,8 @@ if __name__ == '__main__':
     
     ## Set up Model Name
     model_name='3D_UNet'
-    n_aug = str("_with_augmentations")  # augmentations
-    n_oh = str("")                      # one-hot encoding
+    n_aug = str("_w_augs")  # augmentations
+    n_oh = str("")                      # one-hot encoding -> flag became obsolete
     n_soft = str("")                    # soft segmentation
     n_bin = str("")                     # binary segmentation
     n_sigma = str("")                   # sigma for Gaussian Noise
@@ -220,10 +230,11 @@ if __name__ == '__main__':
         model_name='2D_UNet'
         
     if augmentations == None:
-        n_aug = str("_no_augmentations")
-        
-    if opt.one_hot:
-        n_oh = str("_one_hot")
+        n_aug = str("_no_augs")
+
+    # parameter one_hot became obsolete, as independent of this, the soft masks are always created     
+    # if opt.one_hot:
+    #     n_oh = str("_one_hot")
 
     if opt.soft:
         n_soft = str("_soft")
@@ -236,7 +247,8 @@ if __name__ == '__main__':
         n_grad_accum = str(f"_grad_accum_{opt.n_accum_grad_batch}")
 
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dimUNet_{opt.dim}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
+    n_loss_w = str(f"_dsc_{opt.dsc_loss_w}_ce_{opt.ce_loss_w}_soft_{opt.soft_loss_w}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
@@ -253,7 +265,7 @@ if __name__ == '__main__':
     logger = TensorBoardLogger(
         save_dir=str(filepath_logs),
         name=model_name,
-        version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
+        version=str(f"{model_name}_v{version}_lr{opt.lr}{n_loss_w}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
         default_hp_metric=False,
     )
 
