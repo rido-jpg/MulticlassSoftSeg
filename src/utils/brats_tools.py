@@ -73,8 +73,7 @@ def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
     Returns:
         numpy.ndarray: The central slice as a NumPy array.
     """
-    # check if the input is a tensor
-    if nifti_np_array.dim() == 3:
+    if nifti_np_array.ndim == 3:
         # Determine the slice index
         slice_index = nifti_np_array.shape[axis] // 2
         
@@ -87,7 +86,7 @@ def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
             slice_data = nifti_np_array[:, :, slice_index]
         else:
             raise ValueError("Invalid axis. Axis must be 0, 1, or 2.")
-    elif nifti_np_array.dim() == 4:
+    elif nifti_np_array.ndim == 4:
         # Determine the slice index
         slice_index = nifti_np_array.shape[axis+1] // 2
 
