@@ -26,7 +26,7 @@ from utils.brats_tools import soften_gt
 
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, sigma:float=0.1, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0, conf=None):
+    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, sigma:float=0.1, start_lr:float=0.0001, lr_end_factor:float=0.01, n_classes:int=4, l2_reg_w:float=0.001, dsc_loss_w:float=1.0, ce_loss_w:float=1.0, soft_loss_w:float=0.0 ,  conf=None):
         super(LitUNetModule, self).__init__()
 
         self.save_hyperparameters()
@@ -41,6 +41,9 @@ class LitUNetModule(pl.LightningModule):
         self.linear_end_factor = lr_end_factor
         self.l2_reg_w = l2_reg_w
         self.dsc_loss_w = dsc_loss_w
+        self.ce_loss_w = ce_loss_w
+        self.soft_loss_w = soft_loss_w
+
         self.epochs = epochs
         self.dim = dim
         self.groups = groups    # number of resnet block groups
@@ -205,34 +208,45 @@ class LitUNetModule(pl.LightningModule):
         # else:
         #     masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
 
+
         with torch.no_grad():   # is this torch.no_grad() necessary?
             masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
             oh_masks = F.one_hot(masks, num_classes=self.n_classes).permute(0, 4, 1, 2, 3).float()
             soft_masks = soften_gt(oh_masks.cpu(), self.sigma).to(self.device)
+            del oh_masks
             
         # Regression Loss (SOFT LOSS)
-        mse_loss = self.MSE(logits, soft_masks)
+        if self.soft_loss_w == 0:
+            mse_loss = torch.tensor(0.0)
+        else:
+            mse_loss = self.MSE(logits, soft_masks) * self.soft_loss_w
 
         # Classification Losses (HARD LOSSES)
-        ce_loss = self.CEL(logits, masks)
+        if self.ce_loss_w == 0:
+            ce_loss = torch.tensor(0.0)
+        else:
+            ce_loss = self.CEL(logits, masks) * self.ce_loss_w
 
         # Brats Dice Losses for subregions equally weighted
-        dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
-        dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3
-        dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
+        if self.dsc_loss_w == 0:
+            dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
+        else:
+            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
+            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3
+            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
 
         # Weight Regularization
-        l2_reg = torch.tensor(0.0, device="cuda").to(non_blocking=True)
+        l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
 
         for param in self.model.parameters():
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
 
         return {
-            "mse_loss": mse_loss * self.soft,
-            "ce_loss": ce_loss * (1 - self.soft),
-            "dice_ET_loss": dice_ET_loss * (1 - self.soft),
-            "dice_TC_loss": dice_TC_loss * (1 - self.soft),
-            "dice_WT_loss": dice_WT_loss * (1 - self.soft),
+            "mse_loss": mse_loss,
+            "ce_loss": ce_loss,
+            "dice_ET_loss": dice_ET_loss,
+            "dice_TC_loss": dice_TC_loss,
+            "dice_WT_loss": dice_WT_loss,
             "l2_reg_loss": (l2_reg * self.l2_reg_w),
         }
     
