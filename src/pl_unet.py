@@ -17,6 +17,7 @@ from models.unet3D_H import Unet3D
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
 from utils.losses import AdapWingLoss
+from TPTBox import np_utils
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
 
@@ -40,6 +41,7 @@ class LitUNetModule(pl.LightningModule):
         self.soft = opt.soft
         self.one_hot = opt.one_hot
         self.sigma = opt.sigma
+        self.dilate = opt.dilate
 
         self.start_lr = opt.lr
         self.linear_end_factor = opt.lr_end_factor
@@ -220,8 +222,19 @@ class LitUNetModule(pl.LightningModule):
         with torch.no_grad():   # is this torch.no_grad() necessary?
             masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
             oh_masks = F.one_hot(masks, num_classes=self.n_classes).permute(0, 4, 1, 2, 3).float()
-            soft_masks = soften_gt(oh_masks.cpu(), self.sigma).to(self.device)
-            del oh_masks
+
+            if self.dilate != 0:
+                oh_masks_np = oh_masks.cpu().numpy()
+                dilated_oh_seg_np = np.zeros_like(oh_masks_np)
+                for batch_item in range(oh_masks_np.shape[0]):
+                    for channel in range(oh_masks_np.shape[1]):
+                        dilated_oh_seg_np[batch_item, channel] = np_utils.np_dilate_msk(oh_masks_np[batch_item,channel], mm=self.dilate, connectivity=3)  
+                dilated_oh_seg = torch.from_numpy(dilated_oh_seg_np)
+                soft_masks = soften_gt(dilated_oh_seg, self.sigma).to(self.device)
+                del dilated_oh_seg, dilated_oh_seg_np, oh_masks_np, oh_masks
+            else:
+                soft_masks = soften_gt(oh_masks.cpu(), self.sigma).to(self.device)
+                del oh_masks
             
         # Regression Loss (SOFT LOSS)
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
