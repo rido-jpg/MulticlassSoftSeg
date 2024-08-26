@@ -43,7 +43,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Aadaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
-    parser.add_argument("-dilation", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
+    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
@@ -220,6 +220,7 @@ if __name__ == '__main__':
     n_bin = str("")                     # binary segmentation
     n_sigma = str("")                   # sigma for Gaussian Noise
     n_grad_accum = str("")              # gradient accumulation
+    n_dilate = str("")                  # number of voxel neighbor layers to dilate to for soft masks
 
     if opt.do2D:
         model_name='2D_UNet'
@@ -233,6 +234,9 @@ if __name__ == '__main__':
 
     if opt.sigma != 0:
         n_sigma = str(f"_sigma_{opt.sigma}")
+
+    if opt.dilate != 0:
+        n_dilate = str(f"_dilate_{opt.dilate}")
 
     if binary:
         n_bin = str("_binary")
@@ -249,7 +253,7 @@ if __name__ == '__main__':
             if value != 0.0:
                 n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
