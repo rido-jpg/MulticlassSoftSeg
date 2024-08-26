@@ -4,7 +4,7 @@ import lightning.pytorch as pl
 from argparse import Namespace
 from lightning.pytorch.callbacks import LearningRateMonitor
 from pl_unet import LitUNetModule
-from data.bids_dataset import BidsDataModule, brats_keys
+from data.bids_dataset import BidsDataModule, brats_keys, modalities
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 from monai.transforms import (
@@ -40,8 +40,8 @@ def parse_train_param(parser=None):
     #
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
     parser.add_argument("-resize", type=int, nargs= "+", default=(152, 192, 144), help="Resize the input images to this size (divisible by 8)")
-    parser.add_argument("-contrast", type=str, default='multimodal', help="Type of MRI images to be used")
-    parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks for training")
+    parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
+    parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Aadaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
     parser.add_argument("-dilation", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
     #
@@ -50,11 +50,16 @@ def parse_train_param(parser=None):
     parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
     parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
     parser.add_argument("-ce_loss_w", type=float, default=1.0, help="Cross Entropy Loss Weight Factor")
-    parser.add_argument("-soft_loss_w", type=float, default=0.0, help="Soft Loss Weight Factor")
+    parser.add_argument("-hard_loss_w", type=float, default=1.0, help="Factor that all Classification Losses (CE, Dice) are multiplied with")
+    parser.add_argument("-soft_loss_w", type=float, default=1.0, help="Factor that all Regression Losses (MSE, ADW) are multiplied with")
+    parser.add_argument("-mse_loss_w", type=float, default=0.0, help="Mean Squared Error Loss Weight Factor")
+    parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
-    parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size and sample size")
+    parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size -> using fast_dev_run of pl.Trainer")
+    parser.add_argument("-sample_subset", action="store_true", default=False, help="Test run with smaller sample subset of data")
+    parser.add_argument("-min_config", action="store_true", default=False, help="Use minimal configuration for testing, e.g. small bs, dim, crop etc.")
     parser.add_argument("-no_augmentations", action="store_true", default=False, help="No augmentations during training")
     parser.add_argument("-suffix", type=str, default="", help="Sets a setup name suffix for easier identification")
     #parser.add_argument("-gpus", type=int, default=[0], nargs="+", help="Which GPU indices are used")
@@ -140,8 +145,28 @@ if __name__ == '__main__':
     if opt.soft:
         opt.one_hot = True
         opt.soft_loss_w = 1.0
+        opt.adw_loss_w = 1.0
+        opt.mse_loss_w = 0.0
         opt.ce_loss_w = 0.0
         opt.dsc_loss_w = 0.0
+        opt.hard_loss_w = 0.0
+
+    if opt.hard_loss_w == 0.0:
+        opt.ce_loss_w = 0.0
+        opt.dsc_loss_w = 0.0
+    
+    if opt.soft_loss_w == 0.0:
+        opt.adw_loss_w = 0.0
+        opt.mse_loss_w = 0.0
+
+    if opt.min_config:
+        opt.bs = 1
+        opt.epochs = 5
+        opt.dim = 1
+        opt.groups = 1
+        opt.resize = (8, 8, 8)
+        opt.sample_subset = True
+        opt.no_augmentations = True
 
     print("Train with arguments")
     print(opt)
@@ -149,7 +174,8 @@ if __name__ == '__main__':
 
     # Set device automatically handled by PyTorch Lightning
     data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
-    #data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/Sample-Subset'
+    if opt.sample_subset:
+        data_dir = data_dir + '/Sample-Subset'
     n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
     out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
     img_key = brats_keys[0]
@@ -182,40 +208,9 @@ if __name__ == '__main__':
     if opt.no_augmentations:
         augmentations = None
 
-    model = LitUNetModule(
-        conf = opt,
-        in_channels = in_channels,
-        out_channels = out_channels,
-        epochs = opt.epochs,
-        dim = opt.dim,
-        groups = opt.groups,
-        do2D = opt.do2D,
-        binary= binary,
-        soft = opt.soft,
-        one_hot = opt.one_hot,
-        sigma = opt.sigma,
-        start_lr = opt.lr,
-        lr_end_factor = opt.lr_end_factor,
-        n_classes = n_classes,
-        l2_reg_w = opt.l2_reg_w,
-        dsc_loss_w = opt.dsc_loss_w,
-        ce_loss_w = opt.ce_loss_w,
-        soft_loss_w = opt.soft_loss_w
-    )  
+    model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)  
 
-    data_module = BidsDataModule(
-        data_dir = data_dir,
-        contrast = opt.contrast,
-        do2D = opt.do2D,
-        binary = binary,
-        soft = opt.soft,
-        one_hot = opt.one_hot,
-        batch_size = opt.bs,
-        train_transform = augmentations,
-        resize = tuple(opt.resize),
-        test_transform=None,
-        n_workers=opt.n_cpu,
-    )
+    data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
     
     ## Set up Model Name
     model_name='3D_UNet'
@@ -236,8 +231,7 @@ if __name__ == '__main__':
     # if opt.one_hot:
     #     n_oh = str("_one_hot")
 
-    if opt.soft:
-        n_soft = str("_soft")
+    if opt.sigma != 0:
         n_sigma = str(f"_sigma_{opt.sigma}")
 
     if binary:
@@ -246,9 +240,16 @@ if __name__ == '__main__':
     if opt.n_accum_grad_batch > 1:
         n_grad_accum = str(f"_grad_accum_{opt.n_accum_grad_batch}")
 
+    # include loss weights in model name if non-zero
+    n_loss_w = str("")
+    for arg in vars(opt).items():
+        key, value = arg
+        if 'loss' in key:
+            substring = key.replace("_loss_w", "")
+            if value != 0.0:
+                n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
-    n_loss_w = str(f"_dsc_{opt.dsc_loss_w}_ce_{opt.ce_loss_w}_soft_{opt.soft_loss_w}")
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_bin}{n_oh}{n_soft}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
@@ -265,7 +266,7 @@ if __name__ == '__main__':
     logger = TensorBoardLogger(
         save_dir=str(filepath_logs),
         name=model_name,
-        version=str(f"{model_name}_v{version}_lr{opt.lr}{n_loss_w}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
+        version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
         default_hp_metric=False,
     )
 
