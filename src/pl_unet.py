@@ -9,12 +9,14 @@ import torchmetrics.functional as mF
 from pathlib import Path
 from torch.optim import lr_scheduler
 from torch import nn
+from argparse import Namespace
 from models.unet_copilot import UNet
 from models.unet2D_H import Unet2D
 from models.unet3D_H import Unet3D
 #from medpy.metric.binary import assd
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
+from utils.losses import AdapWingLoss
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
 
@@ -26,27 +28,32 @@ from utils.brats_tools import soften_gt
 
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, sigma:float=0.1, start_lr:float=0.0001, lr_end_factor:float=0.01, n_classes:int=4, l2_reg_w:float=0.001, dsc_loss_w:float=1.0, ce_loss_w:float=1.0, soft_loss_w:float=0.0 ,  conf=None):
+    def __init__(self, opt: Namespace, in_channels: int, out_channels: int, binary: bool=False, n_classes: int=4):
         super(LitUNetModule, self).__init__()
 
         self.save_hyperparameters()
 
-        self.do2D = do2D
+        self.opt = opt
+
+        self.do2D = opt.do2D
         self.binary = binary
-        self.soft = soft
-        self.one_hot = one_hot
-        self.sigma = sigma
+        self.soft = opt.soft
+        self.one_hot = opt.one_hot
+        self.sigma = opt.sigma
 
-        self.start_lr = start_lr
-        self.linear_end_factor = lr_end_factor
-        self.l2_reg_w = l2_reg_w
-        self.dsc_loss_w = dsc_loss_w
-        self.ce_loss_w = ce_loss_w
-        self.soft_loss_w = soft_loss_w
+        self.start_lr = opt.lr
+        self.linear_end_factor = opt.lr_end_factor
+        self.l2_reg_w = opt.l2_reg_w
+        self.dsc_loss_w = opt.dsc_loss_w
+        self.ce_loss_w = opt.ce_loss_w
+        self.soft_loss_w = opt.soft_loss_w
+        self.hard_loss_w = opt.hard_loss_w
+        self.mse_loss_w = opt.mse_loss_w
+        self.adw_loss_w = opt.adw_loss_w
 
-        self.epochs = epochs
-        self.dim = dim
-        self.groups = groups    # number of resnet block groups
+        self.epochs = opt.epochs
+        self.dim = opt.dim
+        self.groups = opt.groups    # number of resnet block groups
 
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
@@ -63,6 +70,7 @@ class LitUNetModule(pl.LightningModule):
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
+        self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
@@ -83,8 +91,8 @@ class LitUNetModule(pl.LightningModule):
     
     def on_fit_start(self):
         tb = self.logger.experiment  # noqa
-        layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss"]
-        layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss"]
+        layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
+        layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
         layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
@@ -216,24 +224,29 @@ class LitUNetModule(pl.LightningModule):
             del oh_masks
             
         # Regression Loss (SOFT LOSS)
-        if self.soft_loss_w == 0:
+        if self.soft_loss_w == 0 or self.mse_loss_w == 0:
             mse_loss = torch.tensor(0.0)
         else:
-            mse_loss = self.MSE(logits, soft_masks) * self.soft_loss_w
+            mse_loss = self.MSE(logits, soft_masks) * self.mse_loss_w * self.soft_loss_w
+
+        if self.adw_loss_w == 0 or self.soft_loss_w == 0:
+            adw_loss = torch.tensor(0.0)
+        else:
+            adw_loss = self.ADWL(logits, soft_masks) * self.adw_loss_w * self.soft_loss_w
 
         # Classification Losses (HARD LOSSES)
-        if self.ce_loss_w == 0:
+        if self.ce_loss_w == 0 or self.hard_loss_w == 0:
             ce_loss = torch.tensor(0.0)
         else:
-            ce_loss = self.CEL(logits, masks) * self.ce_loss_w
+            ce_loss = self.CEL(logits, masks) * self.ce_loss_w * self.hard_loss_w
 
         # Brats Dice Losses for subregions equally weighted
-        if self.dsc_loss_w == 0:
+        if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
-            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3
-            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
+            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
+            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
+            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3 * self.hard_loss_w
 
         # Weight Regularization
         l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
@@ -242,6 +255,7 @@ class LitUNetModule(pl.LightningModule):
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
 
         return {
+            "adw_loss": adw_loss,
             "mse_loss": mse_loss,
             "ce_loss": ce_loss,
             "dice_ET_loss": dice_ET_loss,
