@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import numpy as np
 import lightning.pytorch as pl
 
+from argparse import Namespace
 from TPTBox import NII
 from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
@@ -46,26 +47,21 @@ brats_keys = ['img', 'seg']
 # )
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, sigma:float=0.1, train_transform=None, test_transform=None, resize:tuple[int, int, int]=(200, 200, 152), batch_size:int=2, n_workers:int=16):
+    def __init__(self, opt: Namespace, data_dir: str, format: str='fnio', binary: bool=False, train_transform=None, test_transform=None):
         super().__init__()
+        self.opt = opt
         self.data_dir = data_dir
-        self.contrast = contrast
         self.format = format
-        self.do2D = do2D
         self.binary = binary
-        self.soft = soft
-        self.one_hot = one_hot
-        self.sigma = sigma
-        self.resize = resize
-        self.batch_size = batch_size 
+        self.batch_size = opt.bs 
         self.train_transform = train_transform   
         self.test_transform = test_transform
-        self.n_workers = n_workers
+        self.n_workers = opt.n_cpu
 
     def setup(self, stage: str = None) -> None:
-        self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, soft=self.soft, one_hot=self.one_hot, sigma=self.sigma, transform=self.train_transform,resize=self.resize)
-        self.val_dataset = BidsDataset(self.data_dir + '/val', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, soft=self.soft, one_hot=self.one_hot, sigma=self.sigma, transform=self.test_transform,resize=self.resize)
-        self.test_dataset = BidsDataset(self.data_dir + '/test', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, soft=self.soft, one_hot=self.one_hot, sigma=self.sigma, transform=self.test_transform,resize=self.resize)
+        self.train_dataset = BidsDataset(self.opt, self.data_dir +'/train', suffix=self.format, binary=self.binary, transform=self.train_transform)
+        self.val_dataset = BidsDataset(self.opt, self.data_dir + '/val', suffix=self.format, binary=self.binary, transform=self.test_transform)
+        self.test_dataset = BidsDataset(self.opt, self.data_dir + '/test', suffix=self.format, binary=self.binary, transform=self.test_transform)
         
     def train_dataloader(self) -> torch.Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers, pin_memory=True)
@@ -77,7 +73,7 @@ class BidsDataModule(pl.LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True)
 
 class BidsDataset(Dataset):
-    def __init__(self, data_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=False, binary:bool=False, soft:bool=False, one_hot:bool=True, sigma:float=0.1, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):
+    def __init__(self, opt: Namespace, data_dir:str, prefix:str="", suffix:str='fnio', binary:bool=False, transform=None):
         """
         Parameters:
         data_dir (str): The data directory containing subdirectories for each subject.
@@ -89,18 +85,18 @@ class BidsDataset(Dataset):
         transform(): transformation of image data (augmentations)
         resize (tuple): size of the image to be resized to
         """
-
+        self.opt = opt
         self.data_dir = data_dir   
         self.prefix = prefix     
-        self.contrast = contrast
+        self.contrast = opt.contrast
         self.suffix = suffix
-        self.do2D = do2D
+        self.do2D = opt.do2D
         self.transform = transform
         self.binary = binary
-        self.soft = soft
-        self.one_hot = one_hot
-        self.sigma = sigma
-        self.resize = resize
+        self.soft = opt.soft
+        self.one_hot = opt.one_hot
+        self.sigma = opt.sigma
+        self.resize = tuple(opt.resize)
         self.dict_keys = ['img', 'seg']
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
@@ -110,7 +106,7 @@ class BidsDataset(Dataset):
         else:
             self.n_classes = 4
 
-        if do2D:
+        if self.do2D:
             self.resize = self.resize[:2]
 
         self.postprocess = Compose(
