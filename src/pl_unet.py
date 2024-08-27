@@ -42,6 +42,7 @@ class LitUNetModule(pl.LightningModule):
         self.one_hot = opt.one_hot
         self.sigma = opt.sigma
         self.dilate = opt.dilate
+        self.final_activation = opt.activation
 
         self.start_lr = opt.lr
         self.linear_end_factor = opt.lr_end_factor
@@ -69,6 +70,7 @@ class LitUNetModule(pl.LightningModule):
         self.train_step_outputs = {}
         self.val_step_outputs = {}
 
+        self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
@@ -293,8 +295,16 @@ class LitUNetModule(pl.LightningModule):
                 # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
                 #logits_ET = torch.argmax(logits,)
                 pass
+            
+            if self.final_activation == "softmax":
+                probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
 
-            probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
+            elif self.final_activation == "relu":
+                if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
+                    probs = self.relu(logits)/self.relu(logits).max()
+                else: 
+                    probs = self.relu(logits)
+
             preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
             del probs
 

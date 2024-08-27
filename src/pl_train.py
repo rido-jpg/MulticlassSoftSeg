@@ -33,7 +33,8 @@ def parse_train_param(parser=None):
     parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
-    parser.add_argument("-n_accum_grad_batch", type=int, default=1, help="Number of batches to accumulate gradient over")
+    parser.add_argument("-grad_accum", type=int, default=1, help="Number of batches to accumulate gradient over")
+    parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
@@ -214,7 +215,8 @@ if __name__ == '__main__':
     
     ## Set up Model Name
     model_name='3D_UNet'
-    n_aug = str("_w_augs")  # augmentations
+    n_activ = str(f"_{opt.activation}")  # activation function
+    n_aug = str("_w_augs")              # augmentations
     n_oh = str("")                      # one-hot encoding -> flag became obsolete
     n_soft = str("")                    # soft segmentation
     n_bin = str("")                     # binary segmentation
@@ -241,8 +243,8 @@ if __name__ == '__main__':
     if binary:
         n_bin = str("_binary")
 
-    if opt.n_accum_grad_batch > 1:
-        n_grad_accum = str(f"_grad_accum_{opt.n_accum_grad_batch}")
+    if opt.grad_accum > 1:
+        n_grad_accum = str(f"_grad_accum_{opt.grad_accum}")
 
     # include loss weights in model name if non-zero
     n_loss_w = str("")
@@ -253,7 +255,7 @@ if __name__ == '__main__':
             if value != 0.0:
                 n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_aug}")
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
@@ -299,7 +301,7 @@ if __name__ == '__main__':
         callbacks=callbacks, 
         #profiler=profiler,
         profiler='simple',
-        accumulate_grad_batches=opt.n_accum_grad_batch,
+        accumulate_grad_batches=opt.grad_accum,
     )
 
 
