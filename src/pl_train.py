@@ -42,7 +42,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
     parser.add_argument("-resize", type=int, nargs= "+", default=(152, 192, 144), help="Resize the input images to this size (divisible by 8)")
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
-    parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Aadaptive Wing Loss) for training")
+    parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Adaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
     parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
     #
