@@ -195,7 +195,7 @@ if __name__ == '__main__':
     augmentations = Compose(
         [   
             #RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
-            RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest"]),
+            RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest", "nearest"]),
             #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
             RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
             RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
