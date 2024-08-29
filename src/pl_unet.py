@@ -17,6 +17,7 @@ from models.unet3D_H import Unet3D
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
 from utils.losses import AdapWingLoss
+from utils.gpt_adaptive_wing_loss import AdaptiveWingLoss
 from TPTBox import np_utils
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
@@ -74,7 +75,8 @@ class LitUNetModule(pl.LightningModule):
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
-        self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
