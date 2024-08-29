@@ -27,7 +27,7 @@ sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
 import utils.fastnumpyio.fastnumpyio as fnio
-from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt
+from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt, brats_load
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +37,7 @@ contrasts = ['t1c', 't1n', 't2f', 't2w', 'seg']
 modalities = ['t1c', 't1n', 't2f', 't2w']
 
 # Keys of Dictionary that will be returned by the Dataset
-brats_keys = ['img', 'seg']
+brats_keys = ['img', 'seg', 'soft_seg']
 
 # # Train Transforms
 # train_transforms = Compose(
@@ -97,9 +97,10 @@ class BidsDataset(Dataset):
         self.one_hot = opt.one_hot
         self.sigma = opt.sigma
         self.resize = tuple(opt.resize)
-        self.dict_keys = ['img', 'seg']
+        self.dict_keys = brats_keys
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
+        self.soft_seg_key = self.dict_keys[2]
 
         if self.binary:
             self.n_classes = 2
@@ -112,7 +113,7 @@ class BidsDataset(Dataset):
         self.postprocess = Compose(
             [
                 ResizeWithPadOrCropd(keys=brats_keys, spatial_size=self.resize, mode="symmetric"),
-                CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long)),
+                CastToTyped(keys=brats_keys, dtype=(torch.float, torch.long, torch.float)),
             ]
         )
 
@@ -125,22 +126,11 @@ class BidsDataset(Dataset):
         """"
         returns: dict with keys 'img' and 'seg' containing the MRI image and segmentation mask
         """
-        # Loading segmentation mask
-        mask_path = self.bids_list[idx][self.seg_key]
+        mask_path = self.bids_list[idx][self.seg_key]   # Get the path to the segmentation mask
+        mask = brats_load(str(mask_path), self.suffix, True)    # Load the segmentation mask
 
-        # Load the MRI image and segmentation mask
-        if self.suffix == 'fnio':
-            mask = fnio.load(str(mask_path))
-
-        elif self.suffix == 'nii.gz':
-            mask = load_nifti_as_array(str(mask_path), True)
-
-        # mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type 
-        #DOES THE LINE ABOVE REALLY DO ANYTHING? IN PREPROCESS() WE CONVERT IT TO LONG ANYWAY
-        mask = preprocess(mask, seg=True, binary=self.binary, one_hot=self.one_hot, n_classes=self.n_classes)
-
-        # if self.soft:
-        #     mask = soften_gt(mask, sigma=self.sigma)
+        hard_mask = preprocess(mask, seg=True, binary=self.binary)
+        soft_mask = preprocess(mask, seg=True, binary=self.binary, n_classes=self.n_classes, opt=self.opt, soft=True)
 
         #Loading multimodal stacked images
         if self.contrast == 'multimodal':
@@ -149,15 +139,8 @@ class BidsDataset(Dataset):
             # Load all modalities
             for modality in modalities:
                 img_path = self.bids_list[idx][modality]
-
-                # Load the MRI image and segmentation mask
-                if self.suffix == 'fnio':
-                    img = fnio.load(str(img_path))
-
-                elif self.suffix == 'nii.gz':
-                    img = load_nifti_as_array(str(img_path))
-
-                img = preprocess(img, seg=False, binary=self.binary, one_hot=self.one_hot, n_classes=self.n_classes)
+                img = brats_load(str(img_path), self.suffix)    # Load the MRI image
+                img = preprocess(img, seg=False, binary=self.binary)    # Preprocess the MRI image
                 imgs.append(img)
 
             img = torch.cat(imgs, dim=0)    # Stack the images along the channel dimension
@@ -166,18 +149,11 @@ class BidsDataset(Dataset):
         # Load a single modality
         else:
             img_path = self.bids_list[idx][self.contrast]
-
-            # Load the MRI image and segmentation mask
-            if self.suffix == 'fnio':
-                img = fnio.load(str(img_path))
-
-            elif self.suffix == 'nii.gz':
-                img = load_nifti_as_array(str(img_path))
-        
-            img = preprocess(img, seg=False, binary=self.binary)
+            img = brats_load(str(img_path), self.suffix)    # Load the MRI image
+            img = preprocess(img, seg=False, binary=self.binary)    # Preprocess the MRI image
 
         # Create a dictionary with the MRI image and segmentation mask
-        data_dict = {self.img_key: img, self.seg_key: mask}
+        data_dict = {self.img_key: img, self.seg_key: hard_mask, self.soft_seg_key: soft_mask}
 
         if self.transform:
             data_dict = self.transform(data_dict)
@@ -188,6 +164,7 @@ class BidsDataset(Dataset):
             # Adjust as get_central_slice() expects numpy array and preprocess() returns torch tensor
             data_dict[self.img_key] = get_central_slice(data_dict[self.img_key])
             data_dict[self.seg_key] = get_central_slice(data_dict[self.seg_key])
+            data_dict[self.soft_seg_key] = get_central_slice(data_dict[self.soft_seg_key])
         
         return data_dict
 
@@ -251,12 +228,6 @@ def create_bids_array_list_of_dicts(data_dir:str, prefix:str= "") -> list: #  no
         list_of_array_dicts.append(array_dict)
 
     return list_of_array_dicts
-
-def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
-    #Load nifti file and convert to np array
-    nifti_image = NII.load(file_path, seg)
-    nifti_np_array = nifti_image.get_array()
-    return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
 
 def load_normalized_central_slice_as_array(file_path: str)->np.ndarray:
     nifti_array = load_nifti_as_array(file_path)
