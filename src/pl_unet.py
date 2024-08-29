@@ -9,32 +9,55 @@ import torchmetrics.functional as mF
 from pathlib import Path
 from torch.optim import lr_scheduler
 from torch import nn
+from argparse import Namespace
 from models.unet_copilot import UNet
 from models.unet2D_H import Unet2D
 from models.unet3D_H import Unet3D
 #from medpy.metric.binary import assd
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
+from utils.losses import AdapWingLoss
+from utils.gpt_adaptive_wing_loss import AdaptiveWingLoss
+from TPTBox import np_utils
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
 
+file = Path(__file__).resolve()
+sys.path.append(str(file.parents[1]))
+sys.path.append(str(file.parents[2]))
+
+from utils.brats_tools import soften_gt
+
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, in_channels:int, out_channels:int, epochs:int, dim:int=32, groups:int=8, do2D:bool=False, binary:bool=False, start_lr=0.0001, lr_end_factor=1, n_classes:int=4, l2_reg_w=0.001, dsc_loss_w=1.0, conf=None):
+    def __init__(self, opt: Namespace, in_channels: int, out_channels: int, binary: bool=False, n_classes: int=4):
         super(LitUNetModule, self).__init__()
 
         self.save_hyperparameters()
 
-        self.do2D = do2D
-        self.binary = binary
+        self.opt = opt
 
-        self.start_lr = start_lr
-        self.linear_end_factor = lr_end_factor
-        self.l2_reg_w = l2_reg_w
-        self.dsc_loss_w = dsc_loss_w
-        self.epochs = epochs
-        self.dim = dim
-        self.groups = groups    # number of resnet block groups
+        self.do2D = opt.do2D
+        self.binary = binary
+        self.soft = opt.soft
+        self.one_hot = opt.one_hot
+        self.sigma = opt.sigma
+        self.dilate = opt.dilate
+        self.final_activation = opt.activation
+
+        self.start_lr = opt.lr
+        self.linear_end_factor = opt.lr_end_factor
+        self.l2_reg_w = opt.l2_reg_w
+        self.dsc_loss_w = opt.dsc_loss_w
+        self.ce_loss_w = opt.ce_loss_w
+        self.soft_loss_w = opt.soft_loss_w
+        self.hard_loss_w = opt.hard_loss_w
+        self.mse_loss_w = opt.mse_loss_w
+        self.adw_loss_w = opt.adw_loss_w
+
+        self.epochs = opt.epochs
+        self.dim = opt.dim
+        self.groups = opt.groups    # number of resnet block groups
 
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
@@ -48,8 +71,12 @@ class LitUNetModule(pl.LightningModule):
         self.train_step_outputs = {}
         self.val_step_outputs = {}
 
+        self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
+        self.MSE = nn.MSELoss()
+        #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
@@ -70,8 +97,8 @@ class LitUNetModule(pl.LightningModule):
     
     def on_fit_start(self):
         tb = self.logger.experiment  # noqa
-        layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss"]
-        layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss"]
+        layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
+        layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
         layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
@@ -190,24 +217,63 @@ class LitUNetModule(pl.LightningModule):
         return {"optimizer": optimizer}
         
     def loss(self, logits, preds, masks):
-        masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
+        # if self.one_hot:
+        #     masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks back to integer masks
+        # else:
+        #     masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
 
-        ce_loss = self.CEL(logits, masks)
 
-        l2_reg = torch.tensor(0.0, device="cuda").to(non_blocking=True)
-        
-        # torchmetrics Dice Score used as Dice Loss
-        # dsc_loss = (1 - mF.dice(preds, masks, num_classes=self.n_classes)) * self.dsc_loss_w  # preds and masks are not one-hot encoded
+        with torch.no_grad():   # is this torch.no_grad() necessary?
+            masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
+            oh_masks = F.one_hot(masks, num_classes=self.n_classes).permute(0, 4, 1, 2, 3).float()
 
-        # Brats Dice Loss (Sum of dice_ET, dice_TC, dice_WT divided by 3)
-        dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3
-        dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3
-        dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3
-        #dsc_loss = (1 - (dice_ET + dice_TC + dice_WT) / 3) * self.dsc_loss_w
+            if self.dilate != 0:
+                oh_masks_np = oh_masks.cpu().numpy()
+                dilated_oh_seg_np = np.zeros_like(oh_masks_np)
+                for batch_item in range(oh_masks_np.shape[0]):
+                    for channel in range(oh_masks_np.shape[1]):
+                        dilated_oh_seg_np[batch_item, channel] = np_utils.np_dilate_msk(oh_masks_np[batch_item,channel], mm=self.dilate, connectivity=3)  
+                dilated_oh_seg = torch.from_numpy(dilated_oh_seg_np)
+                soft_masks = soften_gt(dilated_oh_seg, self.sigma).to(self.device)
+                del dilated_oh_seg, dilated_oh_seg_np, oh_masks_np, oh_masks
+            else:
+                soft_masks = soften_gt(oh_masks.cpu(), self.sigma).to(self.device)
+                del oh_masks
+            
+        # Regression Loss (SOFT LOSS)
+        if self.soft_loss_w == 0 or self.mse_loss_w == 0:
+            mse_loss = torch.tensor(0.0)
+        else:
+            mse_loss = self.MSE(logits, soft_masks) * self.mse_loss_w * self.soft_loss_w
+
+        if self.adw_loss_w == 0 or self.soft_loss_w == 0:
+            adw_loss = torch.tensor(0.0)
+        else:
+            adw_loss = self.ADWL(logits, soft_masks) * self.adw_loss_w * self.soft_loss_w
+
+        # Classification Losses (HARD LOSSES)
+        if self.ce_loss_w == 0 or self.hard_loss_w == 0:
+            ce_loss = torch.tensor(0.0)
+        else:
+            ce_loss = self.CEL(logits, masks) * self.ce_loss_w * self.hard_loss_w
+
+        # Brats Dice Losses for subregions equally weighted
+        if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
+            dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
+        else:
+            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
+            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
+            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3 * self.hard_loss_w
+
+        # Weight Regularization
+        l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
 
         for param in self.model.parameters():
             l2_reg += torch.norm(param).to(self.device, non_blocking=True)
+
         return {
+            "adw_loss": adw_loss,
+            "mse_loss": mse_loss,
             "ce_loss": ce_loss,
             "dice_ET_loss": dice_ET_loss,
             "dice_TC_loss": dice_TC_loss,
@@ -231,8 +297,16 @@ class LitUNetModule(pl.LightningModule):
                 # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
                 #logits_ET = torch.argmax(logits,)
                 pass
+            
+            if self.final_activation == "softmax":
+                probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
 
-            probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
+            elif self.final_activation == "relu":
+                if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
+                    probs = self.relu(logits)/self.relu(logits).max()
+                else: 
+                    probs = self.relu(logits)
+
             preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
             del probs
 
@@ -246,6 +320,9 @@ class LitUNetModule(pl.LightningModule):
         return losses, logits, masks, preds
     
     def _shared_metric_step(self, loss, logits, masks, preds):
+        # if self.one_hot and not self.soft:
+        #     masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks to integer masks
+
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
@@ -311,24 +388,7 @@ class LitUNetModule(pl.LightningModule):
         for m, v in outputs.items():
             stacked = torch.stack(v)
             results[m] = torch.mean(stacked) if m != "dice_p_cls" else torch.mean(stacked, dim=0)
-        return results
-
-    def _to_one_hot(self, tensor, num_classes):
-        """
-        Convert a tensor to one-hot encoding.
-        
-        Args:
-            tensor: The input tensor of shape (batch_size, 1, height, width) or (batch_size, height, width).
-            num_classes: The number of classes.
-        
-        Returns:
-            One-hot encoded tensor of shape (batch_size, num_classes, height, width).
-        """
-        if tensor.ndim == 4:
-            tensor = tensor.squeeze(1)  # Shape: (batch_size, height, width)
-        one_hot = F.one_hot(tensor, num_classes=num_classes)  # Shape: (batch_size, height, width, num_classes)
-        one_hot = one_hot.permute(0, 3, 1, 2)  # Shape: (batch_size, num_classes, height, width)
-        return one_hot       
+        return results   
     
     def _filter_empty_classes(self, preds_one_hot, masks_one_hot):
         """

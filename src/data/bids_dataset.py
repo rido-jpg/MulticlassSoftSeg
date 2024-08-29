@@ -4,17 +4,14 @@ import logging
 import random
 import csv
 import sys
-import math
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 import torch
 import torch.nn.functional as F
 import numpy as np
 import lightning.pytorch as pl
 
-
+from argparse import Namespace
 from TPTBox import NII
-from torch import nn
-from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
 
@@ -30,7 +27,7 @@ sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
 import utils.fastnumpyio.fastnumpyio as fnio
-from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice
+from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,23 +47,21 @@ brats_keys = ['img', 'seg']
 # )
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str, contrast:str='t2f', format:str='fnio', do2D:bool=False, binary:bool=False, train_transform=None, test_transform=None, resize:tuple[int, int, int]=(200, 200, 152), batch_size:int=2, n_workers:int=16):
+    def __init__(self, opt: Namespace, data_dir: str, format: str='fnio', binary: bool=False, train_transform=None, test_transform=None):
         super().__init__()
+        self.opt = opt
         self.data_dir = data_dir
-        self.contrast = contrast
         self.format = format
-        self.do2D = do2D
         self.binary = binary
-        self.resize = resize
-        self.batch_size = batch_size 
+        self.batch_size = opt.bs 
         self.train_transform = train_transform   
         self.test_transform = test_transform
-        self.n_workers = n_workers
+        self.n_workers = opt.n_cpu
 
     def setup(self, stage: str = None) -> None:
-        self.train_dataset = BidsDataset(self.data_dir +'/train', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.train_transform,resize=self.resize)
-        self.val_dataset = BidsDataset(self.data_dir + '/val', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,resize=self.resize)
-        self.test_dataset = BidsDataset(self.data_dir + '/test', contrast=self.contrast, suffix=self.format, do2D=self.do2D, binary=self.binary, transform=self.test_transform,resize=self.resize)
+        self.train_dataset = BidsDataset(self.opt, self.data_dir +'/train', suffix=self.format, binary=self.binary, transform=self.train_transform)
+        self.val_dataset = BidsDataset(self.opt, self.data_dir + '/val', suffix=self.format, binary=self.binary, transform=self.test_transform)
+        self.test_dataset = BidsDataset(self.opt, self.data_dir + '/test', suffix=self.format, binary=self.binary, transform=self.test_transform)
         
     def train_dataloader(self) -> torch.Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers, pin_memory=True)
@@ -78,7 +73,7 @@ class BidsDataModule(pl.LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True)
 
 class BidsDataset(Dataset):
-    def __init__(self, data_dir:str, prefix:str="", contrast:str='t2f', suffix:str='fnio', do2D:bool=False, binary:bool=False, transform=None, resize:tuple[int, int, int]=(200, 200, 152)):
+    def __init__(self, opt: Namespace, data_dir:str, prefix:str="", suffix:str='fnio', binary:bool=False, transform=None):
         """
         Parameters:
         data_dir (str): The data directory containing subdirectories for each subject.
@@ -90,21 +85,28 @@ class BidsDataset(Dataset):
         transform(): transformation of image data (augmentations)
         resize (tuple): size of the image to be resized to
         """
-
+        self.opt = opt
         self.data_dir = data_dir   
         self.prefix = prefix     
-        self.contrast = contrast
+        self.contrast = opt.contrast
         self.suffix = suffix
-        self.do2D = do2D
+        self.do2D = opt.do2D
         self.transform = transform
         self.binary = binary
-        #self.padding = padding
-        self.resize = resize
+        self.soft = opt.soft
+        self.one_hot = opt.one_hot
+        self.sigma = opt.sigma
+        self.resize = tuple(opt.resize)
         self.dict_keys = ['img', 'seg']
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
 
-        if do2D:
+        if self.binary:
+            self.n_classes = 2
+        else:
+            self.n_classes = 4
+
+        if self.do2D:
             self.resize = self.resize[:2]
 
         self.postprocess = Compose(
@@ -133,9 +135,12 @@ class BidsDataset(Dataset):
         elif self.suffix == 'nii.gz':
             mask = load_nifti_as_array(str(mask_path), True)
 
-        mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type
-        mask = preprocess(mask, True, self.binary)
+        # mask = np.array(mask, dtype=np.uint8)   # Ensure mask is integer type 
+        #DOES THE LINE ABOVE REALLY DO ANYTHING? IN PREPROCESS() WE CONVERT IT TO LONG ANYWAY
+        mask = preprocess(mask, seg=True, binary=self.binary, one_hot=self.one_hot, n_classes=self.n_classes)
 
+        # if self.soft:
+        #     mask = soften_gt(mask, sigma=self.sigma)
 
         #Loading multimodal stacked images
         if self.contrast == 'multimodal':
@@ -152,7 +157,7 @@ class BidsDataset(Dataset):
                 elif self.suffix == 'nii.gz':
                     img = load_nifti_as_array(str(img_path))
 
-                img = preprocess(img, False, self.binary)
+                img = preprocess(img, seg=False, binary=self.binary, one_hot=self.one_hot, n_classes=self.n_classes)
                 imgs.append(img)
 
             img = torch.cat(imgs, dim=0)    # Stack the images along the channel dimension
@@ -169,7 +174,7 @@ class BidsDataset(Dataset):
             elif self.suffix == 'nii.gz':
                 img = load_nifti_as_array(str(img_path))
         
-            img = preprocess(img, False, self.binary)
+            img = preprocess(img, seg=False, binary=self.binary)
 
         # Create a dictionary with the MRI image and segmentation mask
         data_dict = {self.img_key: img, self.seg_key: mask}
@@ -352,30 +357,3 @@ def save_bids_niftis_as_fnio(list_of_path_dicts:list):
                 convert_nifti_to_fnio(path_as_string)
         print(f"subject {subject_dict.get('subject')} done.")
         print(f"-------------------------------")
-
-
-# class Preprocess(nn.Module):
-#     """ Module to pre-process data coming from the dataset """
-
-#     @torch.no_grad()    # disable gradients for efficiency
-#     def forward(self, img, seg:bool, do2D:bool, binary:bool) -> torch.Tensor:
-
-#         #Normalize the MRI image
-#         if not seg:
-#             img = normalize(img)
-
-#         # Get a 2D slice if specified
-#         if self.do2D:
-#             img= get_central_slice(img)
-
-#         # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
-#         if self.binary and seg:
-#             img[img > 0] = 1
-
-#         # Convert numpy arrays to PyTorch tensors and add a channel dimension
-#         if not seg: # MRI Image
-#             img = torch.from_numpy(img).unsqueeze(0).float()
-#         else: # Segmentation mask
-#             img = torch.from_numpy(img).unsqueeze(0).long()
-
-#         return img
