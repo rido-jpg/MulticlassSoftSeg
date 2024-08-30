@@ -34,6 +34,10 @@ def parse_train_param(parser=None):
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
     parser.add_argument("-grad_accum", type=int, default=1, help="Number of batches to accumulate gradient over")
+    parser.add_argument("-precision", type=str, default = 'full', choices=['full', 'mixed'], help = "Precision for training, full is 32-bit, mixed is 16-bit")
+    parser.add_argument("-matmul_precision", type=str, default='highest', choices=['highest', 'high', 'medium'], help="Precision for Matrix multiplications")
+    parser.add_argument("-val_every_n_epoch", type=int, default=1, help="Validation every n epochs")
+
     parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
@@ -48,6 +52,7 @@ def parse_train_param(parser=None):
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
+
     parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
     parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
     parser.add_argument("-ce_loss_w", type=float, default=1.0, help="Cross Entropy Loss Weight Factor")
@@ -55,6 +60,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-soft_loss_w", type=float, default=1.0, help="Factor that all Regression Losses (MSE, ADW) are multiplied with")
     parser.add_argument("-mse_loss_w", type=float, default=0.0, help="Mean Squared Error Loss Weight Factor")
     parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
+
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
@@ -168,6 +174,12 @@ if __name__ == '__main__':
         opt.resize = (8, 8, 8)
         opt.sample_subset = True
         opt.no_augmentations = True
+        opt.n_cpu = 0
+
+    if opt.precision == 'mixed':
+        opt.precision = '16-mixed'
+    else:
+        opt.precision = '32-true'
 
     print("Train with arguments")
     print(opt)
@@ -180,6 +192,8 @@ if __name__ == '__main__':
     n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
     out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
     img_key = brats_keys[0]
+
+    torch.set_float32_matmul_precision(opt.matmul_precision)
 
     if opt.contrast == 'multimodal':
         in_channels = 4
@@ -209,7 +223,10 @@ if __name__ == '__main__':
     if opt.no_augmentations:
         augmentations = None
 
-    model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)  
+    model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
+
+    # Compile the model
+    model = torch.compile(model)
 
     data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
     
@@ -255,7 +272,7 @@ if __name__ == '__main__':
             if value != 0.0:
                 n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
+    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}_precision_{opt.precision}_matmulprec_{opt.matmul_precision}_{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
@@ -294,9 +311,11 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         fast_dev_run=opt.test_run,
         max_epochs=opt.epochs, 
-        default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs', 
+        default_root_dir='/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs',
+        check_val_every_n_epoch=opt.val_every_n_epoch,
+        precision = opt.precision, 
         log_every_n_steps=10, 
-        accelerator='auto',
+        accelerator='gpu',
         logger=logger,
         callbacks=callbacks, 
         #profiler=profiler,
