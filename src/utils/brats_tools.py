@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 import scipy.ndimage
+from argparse import Namespace
+from TPTBox import NII, np_utils
+import utils.fastnumpyio.fastnumpyio as fnio
 
 def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet'):
     # Create a masked array where only values 1, 2, and 3 are included
@@ -102,32 +105,33 @@ def get_central_slice(nifti_np_array: np.ndarray, axis:int=2)->np.ndarray:
 
     return slice_data    
 
-def preprocess(img:np.array, seg:bool, binary:bool, one_hot:bool, n_classes:int) -> torch.Tensor:
+def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: Namespace=None, soft:bool=False) -> torch.Tensor:
     '''
     Preprocess the MRI image and segmentation mask.
     1. Z-Standardize the MRI intensity values
     2. Depending on config convert the segmentation mask to binary classification labels (tumor vs. non-tumor)
-    3. Add Channel dimension to achieve desired shape [C, H, W, D] where C=1
-    4. Convert numpy arrays to PyTorch tensors (float for MRI, long for segmentation mask)
+    3. Convert numpy arrays to PyTorch tensors (float for MRI, long for segmentation mask)
+    4. If soft, one-hot encode, premute and soften the segmentation mask. The resulting shape is [C, H, W, D], where C=n_classes
+        Else, just unsqueeze and add Channel dimension to achieve desired shape [C, H, W, D] where C=1
 
     Parameters:
         img (np.array): MRI image or segmentation mask
         seg (bool): True if the input is a segmentation mask
         binary (bool): True if the segmentation mask should be converted to binary labels
-        one_hot (bool): True if the segmentation mask should be converted to one-hot encoded labels
         n_classes (int): Number of classes in the segmentation mask
+        opt (Namespace): Configuration containing, soft parameter, sigma, and dilate parameter
     
     '''
     #Normalize the MRI image
     if not seg:
-        img = normalize(img)
+        img_np = normalize(img_np)
 
     # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
     if binary and seg:
-        img[img > 0] = 1
+        img_np[img_np > 0] = 1
 
     # Convert numpy arrays to PyTorch tensors
-    img_tensor = torch.from_numpy(img.copy())
+    img_tensor = torch.from_numpy(img_np.copy())
     # img_tensor = torch.tensor(img) 
     """
     UserWarning: The given NumPy array is not writable, and PyTorch does
@@ -136,18 +140,22 @@ def preprocess(img:np.array, seg:bool, binary:bool, one_hot:bool, n_classes:int)
     /pytorch_1712608853085/work/torch/csrc/utils/tensor_numpy.cpp:206.)
     """
 
-    # Ensure the image is in the correct type
+    # Ensure the image has the correct type
     if not seg:
         img_tensor = img_tensor.float()
     else:
         img_tensor = img_tensor.long()
 
-    # if one_hot and seg:
-    #     img_tensor = F.one_hot(img_tensor, num_classes=n_classes).permute(3, 0, 1, 2) #one-hot encode and permute to [C, H, W, D]
-    # else:
-    #     img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
+    # In Soft Case, one-hot encode the segmentation mask and apply Gaussian smoothing, then permute to [C, H, W, D], else just add channel dimension
+    if soft:
+        img_tensor = F.one_hot(img_tensor, num_classes=n_classes).permute(3, 0, 1, 2) #one-hot encode and permute to [C, H, W, D]
 
-    img_tensor = img_tensor.unsqueeze(0)  # add a channel dimension
+        if opt.dilate != 0:
+            img_tensor = dilate_gt(img_tensor, opt.dilate)
+
+        img_tensor = soften_gt(img_tensor, opt.sigma)   # Apply Gaussian smoothing to the segmentation mask
+    else:
+        img_tensor = img_tensor.unsqueeze(0)    # Add channel dimension to achieve desired shape [C, H, W, D]
 
     return img_tensor
 
@@ -165,6 +173,25 @@ def slice_and_pad(img:torch.Tensor, padding:tuple[int, int]|tuple[int, int, int]
         # Apply padding to the image
         img = F.pad(img, (0, pad_x, 0, pad_y))
     return img
+
+def brats_load(path:str, format:str, seg:bool=False) -> np.ndarray:
+    '''
+    Load a NIfTI or fnio file from the specified path.
+    
+    Parameters:
+        path (str): Path to the img file
+        format (str): Format of the NIfTI file (e.g. 'nii' or 'nii.gz')
+        seg (bool): True if the file is a segmentation mask
+    Returns:
+        np.ndarray: NIfTI image as a NumPy array
+    '''
+    if format == 'fnio':
+        img_np_array = fnio.load(str(path))
+
+    elif format == 'nii.gz':
+        img_np_array = load_nifti_as_array(str(path), seg)
+
+    return img_np_array
 
 def normalize(nifti_array:np.ndarray) -> np.ndarray:
     # Z-Score standardization
@@ -203,3 +230,30 @@ def soften_gt(gt:torch.Tensor, sigma:float=1.0) -> torch.Tensor:
         filtered_gt[i] = torch.tensor(scipy.ndimage.gaussian_filter(gt[i].numpy().astype(float), sigma=sigma))
     
     return filtered_gt
+
+def dilate_gt(gt_tensor:torch.Tensor, layers:int) -> torch.Tensor:
+    '''
+    Dilate the ground truth segmentation mask using np_utils_dilate_msk from TPTBox.
+    Parameters:
+        gt (torch.Tensor): Ground truth segmentation mask in one-hot encoded format [C, H, W, D]
+        mm (int): Number of voxel neighbor layers to dilate to (assuming resolution of 1mm)
+    Returns:
+        torch.Tensor: Dilated segmentation mask in [C, H, W, D] format
+    '''
+    oh_gt_np = gt_tensor.numpy()  # Convert the PyTorch tensor to a NumPy array
+    dilated_oh_gt_np = np.zeros_like(oh_gt_np)    # Create an empty array to store the dilated mask
+
+    for channel in range(oh_gt_np.shape[0]):
+        dilated_oh_gt_np[channel] = np_utils.np_dilate_msk(oh_gt_np[channel], mm=layers, connectivity=3)
+
+    dilated_gt_tensor = torch.from_numpy(dilated_oh_gt_np)
+    
+    del oh_gt_np, dilated_oh_gt_np  # Delete the NumPy arrays to free up memory
+    
+    return dilated_gt_tensor
+
+def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
+    #Load nifti file and convert to np array
+    nifti_image = NII.load(file_path, seg)
+    nifti_np_array = nifti_image.get_array()
+    return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io

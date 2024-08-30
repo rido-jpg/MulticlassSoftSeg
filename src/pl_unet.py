@@ -17,7 +17,8 @@ from models.unet3D_H import Unet3D
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
 from utils.losses import AdapWingLoss
-from utils.gpt_adaptive_wing_loss import AdaptiveWingLoss
+#from utils.adaptive_wing_loss import AdaptiveWingLoss
+#from utils.gpt_adaptive_wing_loss import AdaptiveWingLoss
 from TPTBox import np_utils
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
@@ -75,8 +76,8 @@ class LitUNetModule(pl.LightningModule):
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
-        #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
-        self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        #self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
@@ -216,30 +217,9 @@ class LitUNetModule(pl.LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         return {"optimizer": optimizer}
         
-    def loss(self, logits, preds, masks):
-        # if self.one_hot:
-        #     masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks back to integer masks
-        # else:
-        #     masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
-
-
-        with torch.no_grad():   # is this torch.no_grad() necessary?
-            masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
-            oh_masks = F.one_hot(masks, num_classes=self.n_classes).permute(0, 4, 1, 2, 3).float()
-
-            if self.dilate != 0:
-                oh_masks_np = oh_masks.cpu().numpy()
-                dilated_oh_seg_np = np.zeros_like(oh_masks_np)
-                for batch_item in range(oh_masks_np.shape[0]):
-                    for channel in range(oh_masks_np.shape[1]):
-                        dilated_oh_seg_np[batch_item, channel] = np_utils.np_dilate_msk(oh_masks_np[batch_item,channel], mm=self.dilate, connectivity=3)  
-                dilated_oh_seg = torch.from_numpy(dilated_oh_seg_np)
-                soft_masks = soften_gt(dilated_oh_seg, self.sigma).to(self.device)
-                del dilated_oh_seg, dilated_oh_seg_np, oh_masks_np, oh_masks
-            else:
-                soft_masks = soften_gt(oh_masks.cpu(), self.sigma).to(self.device)
-                del oh_masks
-            
+    def loss(self, logits, preds, masks, soft_masks):
+        masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
+                    
         # Regression Loss (SOFT LOSS)
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
             mse_loss = torch.tensor(0.0)
@@ -287,6 +267,7 @@ class LitUNetModule(pl.LightningModule):
     def _shared_step(self, batch, batch_idx, detach2cpu: bool =False):
         imgs = batch['img']     # unpacking the batch
         masks = batch['seg']    # unpacking the batch
+        soft_masks = batch['soft_seg']  # unpacking the batch
         logits = self.model(imgs)   # this implicitly calls the forward method
     
         del imgs # delete the images tensor to free up memory
@@ -312,10 +293,11 @@ class LitUNetModule(pl.LightningModule):
 
             if detach2cpu:
                 masks = masks.detach().cpu()
+                soft_masks = soft_masks.detach().cpu()
                 logits = logits.detach().cpu()
                 preds = preds.detach().cpu()
 
-        losses = self.loss(logits,preds, masks)
+        losses = self.loss(logits,preds, masks, soft_masks)
 
         return losses, logits, masks, preds
     
