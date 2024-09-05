@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import nibabel as nib
 import utils.fastnumpyio.fastnumpyio as fnio
-import TPTBox
+import argparse
 from pathlib import Path
 from argparse import Namespace
 from pl_unet import LitUNetModule
@@ -34,48 +34,63 @@ def get_option(opt: Namespace, attr: str, default, dtype: type = None):
     # option does not exist, return default
     return default
 
+def parse_inf_param(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    
+    parser.add_argument("-ckpt_dir", type=str, default = None, help="Path to the checkpoint file")
+    parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
+    parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds", help="Path to the directory where the predictions should be saved")
+    parser.add_argument("-suffix", type=str, default = "LAST_RUN", help="Suffix for saved predicitons")
+    parser.add_argument("-save_gts", action='store_true', help="Save screenshot of GTs (should only be done once)")
+    parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
+    parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
+    parser.add_argument("-soft", action='store_true', help="Output soft predictions/probabilities")
 
-### RUN SPECIFIC CONFIGURATION ###
-checkpoint_path = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/3D_UNet/3D_UNet_v11_lr0.0001_batch_size_1_n_epochs_400_dimUNet_16_binary:False_with_augmentations_/checkpoints/epoch=372-step=81687-val_diceFG=0.8407_valdiceFG-weights.ckpt'
-data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val'
-suffix = "3D_UNet_v11"  # suffix for saved files
-save_gts = False        # GTs should only need to be saved once
-test_loop = True        # test loop with single sample for debugging
-format = 'fnio'         # format of the data
-
-
-# load hparams from checkpoint to get contrast
-hparams = LitUNetModule.load_from_checkpoint(checkpoint_path).hparams
-conf = hparams.get('conf')
-contrast = get_option(conf, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
-
-
-model_input_size = get_option(conf, 'resize', [200, 200, 152])
-
-print(f"Model input size: {model_input_size}")
-
-og_img_size = [240,240,155]
-
-pad = ResizeWithPadOrCrop(og_img_size)
-crop = ResizeWithPadOrCrop(model_input_size)
+    return parser
 
 softmax = nn.Softmax(dim=1)
 
 if __name__ == '__main__':
+
+    parser = parse_inf_param()
+    conf = parser.parse_args()
+
+    ckpt_path = conf.ckpt_dir
+    data_dir = conf.data_dir
+    save_dir = conf.save_dir
+    suffix = conf.suffix
+    save_gts = conf.save_gts
+    test_loop = conf.test_loop
+    format = conf.format
     
     # try if torch.load works, otherwise raise an error and exit
     try:
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(ckpt_path)
     except Exception as e:
-        print(f"Error: Invalid checkpoint path or file not found: {checkpoint_path}")
+        print(f"Error: Invalid checkpoint path or file not found: {ckpt_path}")
         sys.exit(1)
 
+    # load hparams from checkpoint to get contrast
+    hparams = LitUNetModule.load_from_checkpoint(ckpt_path).hparams
+    train_opt = hparams.get('opt')
+    contrast = get_option(train_opt, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
+
+    model_input_size = get_option(train_opt, 'resize', [200, 200, 152])
+
+    print(f"Model input size: {model_input_size}")
+
+    og_img_size = [240,240,155]
+
+    pad = ResizeWithPadOrCrop(og_img_size)
+    crop = ResizeWithPadOrCrop(model_input_size)
+
     # load trained model
-    model = LitUNetModule.load_from_checkpoint(checkpoint_path)
+    model = LitUNetModule.load_from_checkpoint(ckpt_path)
     model.eval()
 
     # create BidsDataset instance
-    bids_val_ds = BidsDataset(data_dir, contrast=contrast, suffix=format, resize=model_input_size)
+    bids_val_ds = BidsDataset(train_opt, data_dir)
 
     for idx, dicts in enumerate(bids_val_ds):
         img = dicts['img']
@@ -86,6 +101,7 @@ if __name__ == '__main__':
         print(f"Subject: {subject}")
 
         base_path = data_dir + '/' + subject + '/' + subject
+        save_path = save_dir + '/' + subject + '/' + subject
 
         # add batch dimension, in this case 1 because our batch size is 1
         img_tensor = img.unsqueeze(0)
@@ -115,11 +131,11 @@ if __name__ == '__main__':
 
         pred_nii: NII = seg.set_array(preds_array)  # get prediction as nii object
 
-        pred_nii.save(base_path + "-pred-" + suffix + ".nii.gz")    # save prediction as nifti file to view it in ITK Snap
+        pred_nii.save(save_path + "-pred-" + suffix + ".nii.gz")    # save prediction as nifti file to view it in ITK Snap
 
         # get difference between original segmentation mask and prediction
         difference_nifti = NII.get_segmentation_difference_to(pred_nii, seg, ignore_background_tp=True)
-        difference_nifti.save(base_path + "-seg-difference-" + suffix + ".nii.gz")
+        difference_nifti.save(save_path + "-seg-difference-" + suffix + ".nii.gz")
 
         if save_gts:
             gt_slice = get_central_slice(seg.get_array()) # get central slice of ground truth
@@ -134,9 +150,9 @@ if __name__ == '__main__':
                 img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
 
             img_slice = get_central_slice(img_array)
-            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path=base_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
+            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path=save_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
             if save_gts:
-                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=base_path + f"-{contrast}-slice-gt.png", show = False)
+                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path + f"-{contrast}-slice-gt.png", show = False)
 
         if test_loop:     
             # for testing purposes -> exit after one iteration
