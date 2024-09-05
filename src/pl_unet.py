@@ -16,9 +16,8 @@ from models.unet3D_H import Unet3D
 #from medpy.metric.binary import assd
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
-from utils.losses import AdapWingLoss
-#from utils.adaptive_wing_loss import AdaptiveWingLoss
-#from utils.gpt_adaptive_wing_loss import AdaptiveWingLoss
+from utils.losses import AdapWingLoss   # complex region selective loss
+from utils.adaptive_wing_loss import AdaptiveWingLoss # standard implementation
 from TPTBox import np_utils
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
@@ -76,8 +75,8 @@ class LitUNetModule(pl.LightningModule):
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
-        self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
-        #self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)
+        #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
+        self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
@@ -144,10 +143,10 @@ class LitUNetModule(pl.LightningModule):
         losses, logits, masks, preds = self._shared_step(batch, batch_idx)
         loss = self._loss_merge(losses)
         metrics = self._shared_metric_step(loss, logits, masks, preds)
-        self.log('loss/train_loss', loss.detach().cpu(), batch_size=masks.shape[0], prog_bar=True)
+        self.log('loss/train_loss', loss.detach(), batch_size=masks.shape[0], prog_bar=True)
 
         for k, v in losses.items():
-            self.log(f"loss_train/{k}", v.detach().cpu(), batch_size=masks.shape[0], prog_bar=False)
+            self.log(f"loss_train/{k}", v.detach(), batch_size=masks.shape[0], prog_bar=False)
 
         self._shared_metric_append(metrics, self.train_step_outputs)
         return loss
@@ -173,10 +172,10 @@ class LitUNetModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         losses, logits, masks, preds = self._shared_step(batch, batch_idx)
         loss = self._loss_merge(losses)
-        loss = loss.detach().cpu()
+        loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
         for l, v in losses.items():
-            metrics[l] = v.detach().cpu()
+            metrics[l] = v.detach()
         self._shared_metric_append(metrics, self.val_step_outputs)
 
     def on_validation_epoch_end(self) -> None:
@@ -205,8 +204,9 @@ class LitUNetModule(pl.LightningModule):
             #self.log("assd/val_assd", metrics["assd"], on_epoch=True)
         self.val_step_outputs.clear()
 
-    def configure_optimizers(self): # next step to improve this
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr, weight_decay=1e-5)
+    def configure_optimizers(self):
+        #optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr, weight_decay=1e-5)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.start_lr, weight_decay=self.l2_reg_w)
         scheduler = lr_scheduler.LinearLR(
             optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=self.epochs
         )
@@ -241,15 +241,17 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
-            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w / 3 * self.hard_loss_w
-            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w / 3 * self.hard_loss_w
+            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w * self.hard_loss_w
+            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w * self.hard_loss_w
+            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w * self.hard_loss_w
 
-        # Weight Regularization
-        l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
+        # # Weight Regularization
+        # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
 
-        for param in self.model.parameters():
-            l2_reg += torch.norm(param).to(self.device, non_blocking=True)
+        # for param in self.model.parameters():
+        #     l2_reg += torch.norm(param).to(self.device, non_blocking=True)
+
+        l2_reg = torch.tensor(0.0)    
 
         return {
             "adw_loss": adw_loss,
@@ -325,37 +327,14 @@ class LitUNetModule(pl.LightningModule):
         # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
         dice_WT = self.DiceFG((preds > 0), (masks > 0))
 
-        # print(f"dice: {dice}")
-        # print(f"diceFG: {diceFG}")
-        # print(f"dice_p_cls: {dice_p_cls}")
-        # print(f"_shared_metric_step():")
-        # print(f"preds shape: {preds.shape}, masks shape: {masks.shape}")
-        # # print the unique values in the masks and preds tensors
-        # print(f"unique values in masks: {np.unique(masks.cpu().numpy())}")
-        # print(f"unique values in preds: {np.unique(preds.cpu().numpy())}")
-        # with torch.no_grad():
-        #     # Convert to one-hot encoded tensors
-        #     masks_one_hot = self._to_one_hot(masks, self.n_classes)
-        #     preds_one_hot = self._to_one_hot(preds, self.n_classes)
-        #     # print shapes of one-hot encoded masks and preds tensors
-        #     # print(f"masks_one_hot shape: {masks_one_hot.shape}, preds_one_hot shape: {preds_one_hot.shape}")
-        #     # # print the unique values in the one-hot encoded masks and preds tensors
-        #     # print(f"unique values in masks_one_hot: {np.unique(masks_one_hot.cpu().numpy())}")
-        #     # print(f"unique values in preds_one_hot: {np.unique(preds_one_hot.cpu().numpy())}")
-        #     # Filter out empty classes
-        #     preds_one_hot, masks_one_hot = self._filter_empty_classes(preds_one_hot, masks_one_hot)
-        # # calculate average symmetric surface distance (assd)
-        # assd = compute_average_surface_distance(preds_one_hot, masks_one_hot, symmetric=True)
-        # print(f"assd: {assd}")
-        # del masks_one_hot, preds_one_hot
         return {
-            "loss": loss.detach().cpu(), 
-            "dice": dice.detach().cpu(), 
-            "diceFG": diceFG.detach().cpu(), 
-            "dice_p_cls": dice_p_cls.detach().cpu(), 
-            "dice_ET": dice_ET.detach().cpu(),
-            "dice_TC": dice_TC.detach().cpu(),
-            "dice_WT": dice_WT.detach().cpu(),
+            "loss": loss.detach(), 
+            "dice": dice.detach(), 
+            "diceFG": diceFG.detach(), 
+            "dice_p_cls": dice_p_cls.detach(), 
+            "dice_ET": dice_ET.detach(),
+            "dice_TC": dice_TC.detach(),
+            "dice_WT": dice_WT.detach(),
             #"assd": assd
         }           
 
