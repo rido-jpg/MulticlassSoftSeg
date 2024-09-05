@@ -34,8 +34,8 @@ def parse_train_param(parser=None):
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
     parser.add_argument("-grad_accum", type=int, default=1, help="Number of batches to accumulate gradient over")
-    parser.add_argument("-precision", type=str, default = 'full', choices=['full', 'mixed'], help = "Precision for training, full is 32-bit, mixed is 16-bit")
-    parser.add_argument("-matmul_precision", type=str, default='highest', choices=['highest', 'high', 'medium'], help="Precision for Matrix multiplications")
+    parser.add_argument("-precision", type=str, default = 'mixed', choices=['full', 'mixed'], help = "Precision for training, full is 32-bit, mixed is 16-bit")
+    parser.add_argument("-matmul_precision", type=str, default='high', choices=['highest', 'high', 'medium'], help="Precision for Matrix multiplications")
     parser.add_argument("-val_every_n_epoch", type=int, default=1, help="Validation every n epochs")
 
     parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
@@ -53,7 +53,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
 
-    parser.add_argument("-l2_reg_w", type=float, default=0.001, help="L2 Regularization Weight Factor")
+    parser.add_argument("-l2_reg_w", type=float, default=1e-3, help="L2 Regularization Weight Factor")
     parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
     parser.add_argument("-ce_loss_w", type=float, default=1.0, help="Cross Entropy Loss Weight Factor")
     parser.add_argument("-hard_loss_w", type=float, default=1.0, help="Factor that all Classification Losses (CE, Dice) are multiplied with")
@@ -226,7 +226,7 @@ if __name__ == '__main__':
     model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
 
     # Compile the model
-    model = torch.compile(model)
+    #model = torch.compile(model)
 
     data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
     
@@ -272,7 +272,8 @@ if __name__ == '__main__':
             if value != 0.0:
                 n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
-    suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}_precision_{opt.precision}_matmulprec_{opt.matmul_precision}_{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
+    #suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}_precision_{opt.precision}_matmulprec_{opt.matmul_precision}_{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
+    suffix = str(f"{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}")
 
     #Directory for logs
     filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
@@ -316,6 +317,7 @@ if __name__ == '__main__':
         precision = opt.precision, 
         log_every_n_steps=10, 
         accelerator='gpu',
+        devices = -1,
         logger=logger,
         callbacks=callbacks, 
         #profiler=profiler,
