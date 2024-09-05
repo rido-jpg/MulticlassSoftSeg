@@ -27,7 +27,7 @@ sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
 import utils.fastnumpyio.fastnumpyio as fnio
-from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt, brats_load
+from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt, brats_load, load_nifti_as_array
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
