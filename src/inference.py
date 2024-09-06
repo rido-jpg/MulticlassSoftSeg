@@ -46,10 +46,13 @@ def parse_inf_param(parser=None):
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
     parser.add_argument("-soft", action='store_true', help="Output soft predictions/probabilities")
+    parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu"], help="Activation function for output layer")
+    parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
 
     return parser
 
 softmax = nn.Softmax(dim=1)
+relu = nn.ReLU()
 
 if __name__ == '__main__':
 
@@ -83,7 +86,7 @@ if __name__ == '__main__':
     og_img_size = [240,240,155]
 
     pad = ResizeWithPadOrCrop(og_img_size)
-    crop = ResizeWithPadOrCrop(model_input_size)
+    #crop = ResizeWithPadOrCrop(model_input_size)
 
     # load trained model
     model = LitUNetModule.load_from_checkpoint(ckpt_path)
@@ -111,7 +114,15 @@ if __name__ == '__main__':
 
         with torch.no_grad():
             logits = model(img_tensor)  # get logits from model
-            probs = softmax(logits) # apply softmax to get probabilities
+
+            if conf.activation == 'softmax':
+                probs = softmax(logits) # apply softmax to get probabilities
+            elif conf.activation == 'relu':
+                if bool(relu(logits).max()): # checking if the max value of the relu is not zero
+                    probs = relu(logits)/relu(logits).max()
+                else: 
+                    probs = relu(logits)
+
             preds = torch.argmax(probs, dim=1) # get class with highest probability
             preds_cpu = preds.cpu() # move tensor to cpu
             del logits, probs, preds # delete tensors to free up memory
@@ -154,6 +165,73 @@ if __name__ == '__main__':
             if save_gts:
                 plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path + f"-{contrast}-slice-gt.png", show = False)
 
+        
+        if conf.soft:
+            # load soft ground truth segmentation
+            soft_gt = dicts['soft_seg'] 
+
+            with torch.no_grad():
+                logits = model(img_tensor)  # get logits from model
+
+                if conf.activation == 'softmax':
+                    probs = softmax(logits) # apply softmax to get probabilities
+                elif conf.activation == 'relu':
+                    if bool(relu(logits).max()): # checking if the max value of the relu is not zero
+                        probs = relu(logits)/relu(logits).max()
+                    else: 
+                        probs = relu(logits)
+
+                probs_cpu = probs.cpu() # move tensor to cpu
+                del logits, probs # delete tensors to free up memory
+
+            prob_channels = []
+            gt_channels = []
+
+            soft_gt = soft_gt.unsqueeze(0) # add batch dimension
+
+            for channel in range(probs_cpu.shape[1]):
+                prob_channels.append(pad(probs_cpu[:, channel])) # pad probs_cpu to original image size
+                gt_channels.append(pad(soft_gt[:, channel]))     # pad soft_gt to original image size
+
+            probs_padded = torch.stack(prob_channels, dim=1) # stack channels to get shape (1, C, H, W, D)
+            gt_padded = torch.stack(gt_channels, dim=1) # stack channels to get shape (C, H, W, D)
+            
+            probs_padded = probs_padded.squeeze(0) # get rid of batch dimension
+            gt_padded = gt_padded.squeeze(0) # get rid of batch dimension
+            
+            probs_array = probs_padded.numpy() # convert to numpy array (dtype: float32)
+            gt_array = gt_padded.numpy() # convert to numpy array (dtype: float32)
+
+            if conf.round:
+                probs_array = probs_array.round(conf.round) # round probabilities to given number of decimals
+                gt_array = gt_array.round(conf.round) # round probabilities to given number of decimals
+            
+            # load MRI as NII object
+            sample_img_path = base_path + '-t1c.nii.gz'
+            nii_img = NII.load(sample_img_path,seg=False)
+            nii_img.set_dtype_(np.float32)
+
+            if format == 'nii.gz':
+                full_img = NII.load(bids_val_ds.bids_list[idx]['t1c'], seg=False)
+                img_array = full_img.get_array()
+            elif format == 'fnio':
+                img_array = fnio.load(str(bids_val_ds.bids_list[idx]['t1c']))
+
+            for channel in range(probs_array.shape[0]):
+                nii_prob: NII = nii_img.set_array(probs_array[channel])  # get prediction as nii object
+                nii_soft_gt: NII = nii_img.set_array(gt_array[channel])  # get prediction as nii object
+
+                nii_prob.save(save_path + f"-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
+                nii_soft_gt.save(save_path + f"-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
+
+                prob_slice = get_central_slice(probs_array[channel]) # get central slice of predicted probabilities
+                gt_slice = get_central_slice(gt_array[channel])      # get central slice of soft ground truth probabilities
+
+                img_slice = get_central_slice(img_array)
+                
+                plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=save_path + f"-t1c-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
+                plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=save_path + f"-t1c-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
+ 
         if test_loop:     
             # for testing purposes -> exit after one iteration
             break
