@@ -8,10 +8,8 @@ from TPTBox import NII, np_utils
 import utils.fastnumpyio.fastnumpyio as fnio
 
 def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet'):
-    # Create a masked array where only values 1, 2, and 3 are included
-    # and other values are set to be transparent
-    mask = np.isin(seg_slice, [1, 2, 3])
-    masked_seg_slice = np.where(mask, seg_slice, np.nan)  # Replace 0s with NaN for transparency
+
+    masked_seg_slice = np.where(seg_slice == 0, np.nan, seg_slice)  # Replace 0s with NaN, leave everything else unchanged
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
 
