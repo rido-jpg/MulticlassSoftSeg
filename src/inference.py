@@ -48,6 +48,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-soft", action='store_true', help="Output soft predictions/probabilities")
     parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu"], help="Activation function for output layer")
     parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
+    parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices")
 
     return parser
 
@@ -66,6 +67,8 @@ if __name__ == '__main__':
     save_gts = conf.save_gts
     test_loop = conf.test_loop
     format = conf.format
+    axes = {'sagittal': 0, 'coronal': 1, 'axial': 2}
+    axis = axes[conf.axis]
     
     # try if torch.load works, otherwise raise an error and exit
     try:
@@ -149,9 +152,9 @@ if __name__ == '__main__':
         difference_nifti.save(save_path + "-seg-difference-" + suffix + ".nii.gz")
 
         if save_gts:
-            gt_slice = get_central_slice(seg.get_array()) # get central slice of ground truth
+            gt_slice = get_central_slice(seg.get_array(), axis) # get central slice of ground truth
 
-        pred_slice = get_central_slice(preds_array) # get central slice of prediction
+        pred_slice = get_central_slice(preds_array, axis) # get central slice of prediction
 
         for contrast in modalities:
             if format == 'nii.gz':
@@ -160,7 +163,7 @@ if __name__ == '__main__':
             elif format == 'fnio':
                 img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
 
-            img_slice = get_central_slice(img_array)
+            img_slice = get_central_slice(img_array, axis)
             plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path=save_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
             if save_gts:
                 plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path + f"-{contrast}-slice-gt.png", show = False)
@@ -224,10 +227,10 @@ if __name__ == '__main__':
                 nii_prob.save(save_path + f"-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
                 nii_soft_gt.save(save_path + f"-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
 
-                prob_slice = get_central_slice(probs_array[channel]) # get central slice of predicted probabilities
-                gt_slice = get_central_slice(gt_array[channel])      # get central slice of soft ground truth probabilities
+                prob_slice = get_central_slice(probs_array[channel], axis) # get central slice of predicted probabilities
+                gt_slice = get_central_slice(gt_array[channel], axis)      # get central slice of soft ground truth probabilities
 
-                img_slice = get_central_slice(img_array)
+                img_slice = get_central_slice(img_array, axis)
                 
                 plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=save_path + f"-t1c-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
                 plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=save_path + f"-t1c-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
