@@ -49,6 +49,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu"], help="Activation function for output layer")
     parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
     parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices")
+    parser.add_argument("-samples", type=int, default = 0, help="Number of samples to predict. If 0, predict all samples in the dataset")
 
     return parser
 
@@ -69,6 +70,9 @@ if __name__ == '__main__':
     format = conf.format
     axes = {'sagittal': 0, 'coronal': 1, 'axial': 2}
     axis = axes[conf.axis]
+    samples = conf.samples
+    if test_loop:
+        samples = 1
     
     # try if torch.load works, otherwise raise an error and exit
     try:
@@ -235,6 +239,10 @@ if __name__ == '__main__':
                 plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=save_path + f"-t1c-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
                 plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=save_path + f"-t1c-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
  
+        if samples > 0:
+            if idx == (samples - 1):
+                break 
+
         if test_loop:     
             # for testing purposes -> exit after one iteration
             break
