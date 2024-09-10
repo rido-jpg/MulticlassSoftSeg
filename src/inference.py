@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 import TPTBox
+import re
 import numpy as np
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -41,7 +42,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-ckpt_dir", type=str, default = None, help="Path to the checkpoint file")
     parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
     parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds", help="Path to the directory where the predictions should be saved")
-    parser.add_argument("-suffix", type=str, default = "LAST_RUN", help="Suffix for saved predicitons")
+    parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predicitons")
     parser.add_argument("-save_gts", action='store_true', help="Save screenshot of GTs (should only be done once)")
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
@@ -53,6 +54,16 @@ def parse_inf_param(parser=None):
 
     return parser
 
+def extract_unet_version(path: Path) -> str:
+    # Convert Path object to string
+    path_str = str(path)
+    
+    # Regular expression to match '3D_UNet_v' followed by a number
+    match = re.search(r"3D_UNet_v\d+", path_str)
+    
+    # Return the matched part if found, otherwise return None
+    return match.group(0) if match else None
+
 softmax = nn.Softmax(dim=1)
 relu = nn.ReLU()
 
@@ -61,9 +72,9 @@ if __name__ == '__main__':
     parser = parse_inf_param()
     conf = parser.parse_args()
 
-    ckpt_path = conf.ckpt_dir
-    data_dir = conf.data_dir
-    save_dir = conf.save_dir
+    ckpt_path : Path = Path(conf.ckpt_dir)
+    data_dir : Path = Path(conf.data_dir)
+    save_dir : Path = Path(conf.save_dir)
     suffix = conf.suffix
     save_gts = conf.save_gts
     test_loop = conf.test_loop
@@ -73,6 +84,7 @@ if __name__ == '__main__':
     samples = conf.samples
     if test_loop:
         samples = 1
+        
     
     # try if torch.load works, otherwise raise an error and exit
     try:
@@ -85,6 +97,12 @@ if __name__ == '__main__':
     hparams = LitUNetModule.load_from_checkpoint(ckpt_path).hparams
     train_opt = hparams.get('opt')
     contrast = get_option(train_opt, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
+    
+    if suffix is None:
+        suffix = get_option(train_opt,'suffix', '')
+
+    model_name = f"{extract_unet_version(ckpt_path)}_{suffix}"
+    print(f"Model name: {model_name}")
 
     model_input_size = get_option(train_opt, 'resize', [200, 200, 152])
 
@@ -110,8 +128,14 @@ if __name__ == '__main__':
         print(f"---------------------------------")
         print(f"Subject: {subject}")
 
-        base_path = data_dir + '/' + subject + '/' + subject
-        save_path = save_dir + '/' + subject + '/' + subject
+        base_path : Path = data_dir / subject 
+        save_path : Path = save_dir / model_name / subject / f"standard"
+
+        #check if future subfolder exist, else create it
+        slice_path : Path = save_path / f"slices"
+
+        if not slice_path.exists():
+            slice_path.mkdir(parents=True)
 
         # add batch dimension, in this case 1 because our batch size is 1
         img_tensor = img.unsqueeze(0)
@@ -144,16 +168,16 @@ if __name__ == '__main__':
         preds_array = preds_array.astype(np.uint8) # ensure correct type to be able to cast it to a NII object
 
         # load GT segmentation as NII object 
-        seg_path = base_path + '-seg.nii.gz'
+        seg_path = base_path / f"{subject}-seg.nii.gz"
         seg = NII.load(seg_path, seg=True)
 
         pred_nii: NII = seg.set_array(preds_array)  # get prediction as nii object
 
-        pred_nii.save(save_path + "-pred-" + suffix + ".nii.gz")    # save prediction as nifti file to view it in ITK Snap
+        pred_nii.save(save_path/ f"nifti" / f"{subject}-pred-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
 
         # get difference between original segmentation mask and prediction
         difference_nifti = NII.get_segmentation_difference_to(pred_nii, seg, ignore_background_tp=True)
-        difference_nifti.save(save_path + "-seg-difference-" + suffix + ".nii.gz")
+        difference_nifti.save(save_path / f"nifti" /f"{subject}-seg-difference-{suffix}.nii.gz")
 
         if save_gts:
             gt_slice = get_central_slice(seg.get_array(), axis) # get central slice of ground truth
@@ -168,12 +192,18 @@ if __name__ == '__main__':
                 img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
 
             img_slice = get_central_slice(img_array, axis)
-            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path=save_path + f"-{contrast}-slice-pred-{suffix}.png", show=False)
+            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path= save_path / f"slices" /  f"{subject}-{contrast}-{conf.axis}-slice-pred-{suffix}.png", show=False)
             if save_gts:
-                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path + f"-{contrast}-slice-gt.png", show = False)
+                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
 
         
         if conf.soft:
+            soft_save_path = save_dir / model_name / subject / f"channelwise"
+            soft_slice_path : Path = soft_save_path / f"slices"
+
+            if not soft_slice_path.exists():
+                soft_slice_path.mkdir(parents=True)
+
             # load soft ground truth segmentation
             soft_gt = dicts['soft_seg'] 
 
@@ -214,7 +244,7 @@ if __name__ == '__main__':
                 gt_array = gt_array.round(conf.round) # round probabilities to given number of decimals
             
             # load MRI as NII object
-            sample_img_path = base_path + '-t1c.nii.gz'
+            sample_img_path = base_path / f"{subject}-t1c.nii.gz"
             nii_img = NII.load(sample_img_path,seg=False)
             nii_img.set_dtype_(np.float32)
 
@@ -228,16 +258,16 @@ if __name__ == '__main__':
                 nii_prob: NII = nii_img.set_array(probs_array[channel])  # get prediction as nii object
                 nii_soft_gt: NII = nii_img.set_array(gt_array[channel])  # get prediction as nii object
 
-                nii_prob.save(save_path + f"-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
-                nii_soft_gt.save(save_path + f"-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
+                nii_prob.save(soft_save_path / f"niftis" / f"{subject}-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
+                nii_soft_gt.save(soft_save_path / f"niftis" / f"{subject}-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
 
                 prob_slice = get_central_slice(probs_array[channel], axis) # get central slice of predicted probabilities
                 gt_slice = get_central_slice(gt_array[channel], axis)      # get central slice of soft ground truth probabilities
 
                 img_slice = get_central_slice(img_array, axis)
                 
-                plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=save_path + f"-t1c-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
-                plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=save_path + f"-t1c-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
+                plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
+                plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
  
         if samples > 0:
             if idx == (samples - 1):
