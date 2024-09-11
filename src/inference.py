@@ -43,14 +43,18 @@ def parse_inf_param(parser=None):
     parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
     parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds", help="Path to the directory where the predictions should be saved")
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predicitons")
-    parser.add_argument("-save_gts", action='store_true', help="Save screenshot of GTs (should only be done once)")
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
-    parser.add_argument("-soft", action='store_true', help="Output soft predictions/probabilities")
     parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu"], help="Activation function for output layer")
     parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
     parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to predict. If 0, predict all samples in the dataset")
+
+    parser.add_argument("-niftis", action='store_true', help="Save niftis of the predictions")
+    parser.add_argument("-slices", action='store_true', help="Save slices of the predictions and ground truths")
+    #parser.add_argument("-gts", action='store_true', help="Save slices of the ground truth")
+    parser.add_argument("-soft", action='store_true', help="Save channelwise soft predictions/probabilities")
+
 
     return parser
 
@@ -75,8 +79,17 @@ if __name__ == '__main__':
     ckpt_path : Path = Path(conf.ckpt_dir)
     data_dir : Path = Path(conf.data_dir)
     save_dir : Path = Path(conf.save_dir)
+
     suffix = conf.suffix
-    save_gts = conf.save_gts
+
+    #save_gts = conf.gts
+    save_niftis = conf.niftis
+    save_slices = conf.slices
+
+    if not save_slices and not save_niftis:
+        print("Error: No output format selected. Please select at least one of the following: -niftis, -slices")
+        sys.exit(1)
+
     test_loop = conf.test_loop
     format = conf.format
     axes = {'sagittal': 0, 'coronal': 1, 'axial': 2}
@@ -173,27 +186,33 @@ if __name__ == '__main__':
 
         pred_nii: NII = seg.set_array(preds_array)  # get prediction as nii object
 
-        pred_nii.save(save_path/ f"nifti" / f"{subject}-pred-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
+        if save_niftis:
+            pred_nii.save(save_path/ f"nifti" / f"{subject}-pred-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
 
-        # get difference between original segmentation mask and prediction
-        difference_nifti = NII.get_segmentation_difference_to(pred_nii, seg, ignore_background_tp=True)
-        difference_nifti.save(save_path / f"nifti" /f"{subject}-seg-difference-{suffix}.nii.gz")
+            # get difference between original segmentation mask and prediction
+            difference_nifti = NII.get_segmentation_difference_to(pred_nii, seg, ignore_background_tp=True)
+            difference_nifti.save(save_path / f"nifti" /f"{subject}-seg-difference-{suffix}.nii.gz")
 
-        if save_gts:
+        # if save_gts:
+        #     gt_slice = get_central_slice(seg.get_array(), axis) # get central slice of ground truth
+        
+
+        if save_slices:
+
             gt_slice = get_central_slice(seg.get_array(), axis) # get central slice of ground truth
+            pred_slice = get_central_slice(preds_array, axis) # get central slice of prediction
 
-        pred_slice = get_central_slice(preds_array, axis) # get central slice of prediction
+            for contrast in modalities:
+                if format == 'nii.gz':
+                    full_img = NII.load(bids_val_ds.bids_list[idx][contrast], seg=False)
+                    img_array = full_img.get_array()
+                elif format == 'fnio':
+                    img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
 
-        for contrast in modalities:
-            if format == 'nii.gz':
-                full_img = NII.load(bids_val_ds.bids_list[idx][contrast], seg=False)
-                img_array = full_img.get_array()
-            elif format == 'fnio':
-                img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
-
-            img_slice = get_central_slice(img_array, axis)
-            plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path= save_path / f"slices" /  f"{subject}-{contrast}-{conf.axis}-slice-pred-{suffix}.png", show=False)
-            if save_gts:
+                img_slice = get_central_slice(img_array, axis)
+                plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path= save_path / f"slices" /  f"{subject}-{contrast}-{conf.axis}-slice-pred-{suffix}.png", show=False)
+                # if save_gts:
+                #     plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
                 plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
 
         
@@ -258,16 +277,18 @@ if __name__ == '__main__':
                 nii_prob: NII = nii_img.set_array(probs_array[channel])  # get prediction as nii object
                 nii_soft_gt: NII = nii_img.set_array(gt_array[channel])  # get prediction as nii object
 
-                nii_prob.save(soft_save_path / f"niftis" / f"{subject}-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
-                nii_soft_gt.save(soft_save_path / f"niftis" / f"{subject}-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
+                if save_niftis:
+                    nii_prob.save(soft_save_path / f"niftis" / f"{subject}-prob-class{channel}-{suffix}.nii.gz")    # save prediction as nifti file to view it in ITK Snap
+                    nii_soft_gt.save(soft_save_path / f"niftis" / f"{subject}-soft_gt-class{channel}-sigma-{train_opt.sigma}.nii.gz")
 
-                prob_slice = get_central_slice(probs_array[channel], axis) # get central slice of predicted probabilities
-                gt_slice = get_central_slice(gt_array[channel], axis)      # get central slice of soft ground truth probabilities
+                if save_slices:
+                    prob_slice = get_central_slice(probs_array[channel], axis) # get central slice of predicted probabilities
+                    gt_slice = get_central_slice(gt_array[channel], axis)      # get central slice of soft ground truth probabilities
 
-                img_slice = get_central_slice(img_array, axis)
+                    img_slice = get_central_slice(img_array, axis)
                 
-                plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
-                plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
+                    plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
+                    plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
  
         if samples > 0:
             if idx == (samples - 1):
