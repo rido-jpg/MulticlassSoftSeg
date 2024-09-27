@@ -28,13 +28,20 @@ instance_matcher: !NaiveThresholdMatching {allow_many_to_one: false, matching_me
 log_times: true
 segmentation_class_groups: !SegmentationClassGroups
   groups:
-    ncr: !LabelGroup
+    ncr (1): !LabelGroup
       single_instance: false
       value_labels: [1]
-    ed: !LabelGroup
+    ed (2): !LabelGroup
       single_instance: false
       value_labels: [2]
-    et: !LabelGroup
+    et (3): !LabelGroup
       single_instance: false
       value_labels: [3]
+    wt (1, 2, 3): !LabelMergeGroup
+      single_instance: false
+      value_labels: [1, 2, 3]
+    tc (1, 3): !LabelMergeGroup
+      single_instance: false
+      value_labels: [1, 3]
+
 verbose: false
