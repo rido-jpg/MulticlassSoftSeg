@@ -60,6 +60,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-soft_loss_w", type=float, default=1.0, help="Factor that all Regression Losses (MSE, ADW) are multiplied with")
     parser.add_argument("-mse_loss_w", type=float, default=0.0, help="Mean Squared Error Loss Weight Factor")
     parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
+    parser.add_argument("-soft_dice_loss_w", type=float, default=0.0, help="Soft Dice Loss Weight Factor")
 
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
     #
