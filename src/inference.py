@@ -58,7 +58,7 @@ def parse_inf_param(parser=None):
 
     return parser
 
-def extract_unet_version(path: Path) -> str:
+def _extract_unet_version(path: Path) -> str:
     # Convert Path object to string
     path_str = str(path)
     
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     if suffix is None:
         suffix = get_option(train_opt,'suffix', '')
 
-    model_name = f"{extract_unet_version(ckpt_path)}_{suffix}"
+    model_name = f"{_extract_unet_version(ckpt_path)}_{suffix}"
     print(f"Model name: {model_name}")
 
     model_input_size = get_option(train_opt, 'resize', [200, 200, 152])

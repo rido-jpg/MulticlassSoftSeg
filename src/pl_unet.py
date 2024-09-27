@@ -18,7 +18,9 @@ from monai.losses import DiceLoss
 from monai.metrics import DiceMetric, compute_average_surface_distance
 from utils.losses import AdapWingLoss   # complex region selective loss
 from utils.adaptive_wing_loss import AdaptiveWingLoss # standard implementation
+from utils.dice import MemoryEfficientSoftDiceLoss
 from TPTBox import np_utils
+from panoptica.metrics import _compute_dice_coefficient
 #import medpy
 #from panoptica.metrics import _compute_instance_average_symmetric_surface_distance
 
@@ -54,6 +56,7 @@ class LitUNetModule(pl.LightningModule):
         self.hard_loss_w = opt.hard_loss_w
         self.mse_loss_w = opt.mse_loss_w
         self.adw_loss_w = opt.adw_loss_w
+        self.soft_dice_loss_w = opt.soft_dice_loss_w
 
         self.epochs = opt.epochs
         self.dim = opt.dim
@@ -61,7 +64,7 @@ class LitUNetModule(pl.LightningModule):
 
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
-            self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels)
+            self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
         else:
             self.model = Unet3D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
 
@@ -75,6 +78,7 @@ class LitUNetModule(pl.LightningModule):
         self.softmax = nn.Softmax(dim=1)
         self.CEL = nn.CrossEntropyLoss()
         self.MSE = nn.MSELoss()
+        self.SoftDice = MemoryEfficientSoftDiceLoss(apply_nonlin= self.softmax,batch_dice=False, do_bg=True, smooth=1e-5, ddp=False)
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
         self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
@@ -245,6 +249,55 @@ class LitUNetModule(pl.LightningModule):
             dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w * self.hard_loss_w
             dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w * self.hard_loss_w
 
+
+        # Brats Soft Dice Losses for subregions equally weighted
+        if self.soft_dice_loss_w == 0:
+            soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
+        else:
+            brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
+            
+            logits_et = self._prepare_region_logits(logits, brats_regions['ET'])
+            logits_tc = self._prepare_region_logits(logits, brats_regions['TC'])
+            logits_wt = self._prepare_region_logits(logits, brats_regions['WT'])
+
+            gt_tc = ((masks == 1) | (masks == 3)).unsqueeze(1)
+            gt_et = (masks == 3).unsqueeze(1)
+            gt_wt = (masks > 0).unsqueeze(1)
+
+            # masks_ET = ((masks == 3)).unsqueeze(1)
+            # masks_TC = ((masks == 1) | (masks == 3)).unsqueeze(1)
+            # masks_WT = (masks > 0).unsqueeze(1)
+
+            # logits_ET_FG = logits[:, 3, ...].unsqueeze(1)
+            # logits_ET_BG = torch.maximum(torch.maximum(logits[:, 0], logits[:, 1]), logits[:, 2]).unsqueeze(1)
+            # logits_ET = torch.cat([logits_ET_BG, logits_ET_FG], dim=1)
+
+            # logits_TC_FG = torch.maximum(logits[:, 1], logits[:, 3]).unsqueeze(1)
+            # logits_TC_BG = torch.maximum(logits[:, 0], logits[:, 2]).unsqueeze(1)
+            # logits_TC = torch.cat([logits_TC_BG, logits_TC_FG], dim=1)
+
+            # logits_WT_FG = torch.maximum(torch.maximum(logits[:, 1], logits[:, 2]), logits[:, 3]).unsqueeze(1)
+            # logits_WT_BG = logits[:, 0].unsqueeze(1)
+            # logits_WT = torch.cat([logits_WT_BG, logits_WT_FG], dim=1)
+            
+            # probs_ET = self.softmax(logits_ET)
+            # probs_TC = self.softmax(logits_TC)
+            # probs_WT = self.softmax(logits_WT)
+
+            # del logits_ET, logits_ET_FG, logits_ET_BG, logits_TC, logits_TC_FG, logits_TC_BG, logits_WT, logits_WT_FG, logits_WT_BG
+
+            # soft_dice_ET_loss = (1 - self.SoftDice(logits_et, gt_et)) * self.soft_dice_loss_w
+            # soft_dice_TC_loss = (1 - self.SoftDice(logits_tc, gt_tc)) * self.soft_dice_loss_w
+            # soft_dice_WT_loss = (1 - self.SoftDice(logits_wt, gt_wt)) * self.soft_dice_loss_w
+
+            soft_dice_ET_loss = self.SoftDice(logits_et, gt_et) * self.soft_dice_loss_w
+            soft_dice_TC_loss = self.SoftDice(logits_tc, gt_tc) * self.soft_dice_loss_w
+            soft_dice_WT_loss = self.SoftDice(logits_wt, gt_wt) * self.soft_dice_loss_w
+
+            # del logits_et, logits_tc, logits_wt, gt_et, gt_tc, gt_wt
+
+            # del probs_ET, probs_TC, probs_WT, masks_ET, masks_TC, masks_WT
+
         # # Weight Regularization
         # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
 
@@ -257,6 +310,9 @@ class LitUNetModule(pl.LightningModule):
             "adw_loss": adw_loss,
             "mse_loss": mse_loss,
             "ce_loss": ce_loss,
+            "soft_dice_ET_loss": soft_dice_ET_loss,
+            "soft_dice_TC_loss": soft_dice_TC_loss,
+            "soft_dice_WT_loss": soft_dice_WT_loss,
             "dice_ET_loss": dice_ET_loss,
             "dice_TC_loss": dice_TC_loss,
             "dice_WT_loss": dice_WT_loss,
@@ -274,32 +330,40 @@ class LitUNetModule(pl.LightningModule):
     
         del imgs # delete the images tensor to free up memory
 
-        with torch.no_grad():
+        if not self.binary:
+            # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
+            #logits_ET = torch.argmax(logits,)
+            pass
+        
+        if self.final_activation == "softmax":
+            probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
 
-            if not self.binary:
-                # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
-                #logits_ET = torch.argmax(logits,)
-                pass
-            
-            if self.final_activation == "softmax":
-                probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
+        elif self.final_activation == "relu":
+            if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
+                probs = self.relu(logits)/self.relu(logits).max()
+            else: 
+                probs = self.relu(logits)
 
-            elif self.final_activation == "relu":
-                if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
-                    probs = self.relu(logits)/self.relu(logits).max()
-                else: 
-                    probs = self.relu(logits)
+        preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
 
-            preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
-            del probs
+        del probs
 
-            if detach2cpu:
-                masks = masks.detach().cpu()
-                soft_masks = soft_masks.detach().cpu()
-                logits = logits.detach().cpu()
-                preds = preds.detach().cpu()
+        if detach2cpu:
+            masks = masks.detach().cpu()
+            soft_masks = soft_masks.detach().cpu()
+            logits = logits.detach().cpu()
+            preds = preds.detach().cpu()
 
         losses = self.loss(logits,preds, masks, soft_masks)
+
+        # for name, param in self.model.named_parameters():
+        #     print(name, param.requires_grad)
+
+        for k, v in losses.items():
+            if v is not isinstance(v, bool):
+                if v.requires_grad == False and v != 0:
+                    print(f"{k} = {v} requires grad:")
+                    print(f"{v.requires_grad}")
 
         return losses, logits, masks, preds
     
@@ -313,7 +377,7 @@ class LitUNetModule(pl.LightningModule):
         diceFG = self.DiceFG(preds, masks)
         dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
 
-        # in the case that a class is not available in ground truth and preciction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
+        # in the case that a class is not available in ground truth and prediction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
         for idx, score in enumerate(dice_p_cls):
             if score.isnan():
                 dice_p_cls[idx] = 1.0
@@ -366,3 +430,9 @@ class LitUNetModule(pl.LightningModule):
         preds_one_hot = preds_one_hot[:, non_empty_classes]
         masks_one_hot = masks_one_hot[:, non_empty_classes]
         return preds_one_hot, masks_one_hot
+    
+    def _prepare_region_logits(self, logits, target_classes):
+        """
+        Efficiently sum the logits for the given target classes.
+        """
+        return logits[:, target_classes].sum(dim=1, keepdim=True)

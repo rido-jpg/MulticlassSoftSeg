@@ -39,6 +39,9 @@ modalities = ['t1c', 't1n', 't2f', 't2w']
 # Keys of Dictionary that will be returned by the Dataset
 brats_keys = ['img', 'seg', 'soft_seg']
 
+# Dictionary with each brats region and its corresponding labels
+brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
+
 # # Train Transforms
 # train_transforms = Compose(
 #     [
