@@ -83,7 +83,7 @@ class LitUNetCityModule(pl.LightningModule):
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
         self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
-        self.DiceLoss = DiceLoss(sigmoid = True) # Monai Dice Loss
+        self.DiceLoss = DiceLoss(sigmoid = True) # Monai Dice Loss on single channel -> to onehot = True and include background = False not neccesary and wouldn't work
         self.Dice = torchmetrics.Dice()
         self.DiceFG = torchmetrics.Dice(ignore_index=0)
 
@@ -101,6 +101,7 @@ class LitUNetCityModule(pl.LightningModule):
     
     def on_fit_start(self):
         tb = self.logger.experiment  # noqa
+        #
         layout_loss_train = ["loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
         layout_loss_val = ["loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
@@ -320,10 +321,14 @@ class LitUNetCityModule(pl.LightningModule):
         dice = self.Dice(preds, masks)
         diceFG = self.DiceFG(preds, masks)
         if self.n_classes == 1:
-            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes + 1)
+            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes + 1) # average=None returns dice per class
         else:
-            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes)
+            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
 
+        # in the case that a class is not available in ground truth and prediction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
+        for idx, score in enumerate(dice_p_cls):
+            if score.isnan():
+                dice_p_cls[idx] = 1.0
 
         return {    # does it make sense detaching all these scores and losses?
             "loss": loss.detach(), 
