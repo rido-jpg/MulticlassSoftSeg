@@ -174,7 +174,7 @@ class LitUNetModule(pl.LightningModule):
         self.train_step_outputs.clear()
     
     def validation_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
+        losses, logits, masks, preds = self._shared_step(batch, batch_idx, detach2cpu=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -349,10 +349,10 @@ class LitUNetModule(pl.LightningModule):
         del probs
 
         if detach2cpu:
-            masks = masks.detach().cpu()
-            soft_masks = soft_masks.detach().cpu()
-            logits = logits.detach().cpu()
-            preds = preds.detach().cpu()
+            masks = masks.detach()
+            soft_masks = soft_masks.detach()
+            logits = logits.detach()
+            preds = preds.detach()
 
         losses = self.loss(logits,preds, masks, soft_masks)
 
