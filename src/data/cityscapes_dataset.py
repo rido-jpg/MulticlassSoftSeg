@@ -106,10 +106,11 @@ class CityscapesDataset(Dataset):
             img = Image.new("RGB", self.img_size)  # Create a blank image with the dynamic size
             
             reduced_gt = np.zeros(self.img_size, dtype=np.uint8)  # Default reduced ground truth
+            reduced_gt = reduced_gt.transpose(1, 0) # permute so it fits shape of other gts
         else:
             reduced_gt = cs_tools.reduce_classes(gt, 20)  # Reduces to binary case
 
-        img_array = np.array(img)
+        img_array = np.array(img)   # permutes PIL Image from (2048, 1024) to np array with shape (1024, 2048, 3) 
 
         img_array = np.transpose(img_array, (2, 0, 1)) # shape (C, H, W), where C=3 because of RGB
         reduced_gt = np.expand_dims(reduced_gt, axis=0) # shape (C, H, W), where C = 1
@@ -122,7 +123,7 @@ class CityscapesDataset(Dataset):
             soft_gt_tensor = torch.tensor(down_gt)
             gt_tensor = torch.round(soft_gt_tensor.clone().detach()).long()
 
-            logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
+            # logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
             return data_dict
             
@@ -131,7 +132,7 @@ class CityscapesDataset(Dataset):
             gt_tensor = torch.tensor(reduced_gt).long()
             soft_gt_tensor = brats_tools.soften_gt(gt_tensor.clone().detach(), self.sigma)
 
-            logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
+            # logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
         return data_dict
 
