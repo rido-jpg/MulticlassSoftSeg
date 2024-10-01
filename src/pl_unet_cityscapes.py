@@ -85,6 +85,7 @@ class LitUNetCityModule(pl.LightningModule):
         #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
         self.DiceLoss = DiceLoss(sigmoid = True) # Monai Dice Loss
         self.Dice = torchmetrics.Dice()
+        self.DiceFG = torchmetrics.Dice(ignore_index=0)
 
     # # Operates on a mini-batch before it is transferred to the accelerator   
     # def on_before_batch_transfer(self, batch, dataloader_idx):
@@ -103,12 +104,9 @@ class LitUNetCityModule(pl.LightningModule):
         layout_loss_train = ["loss_train/dice_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
         layout_loss_val = ["loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
-        # layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
+        layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
-        # layout_dice_ET_merge = ["dice_ET/train_dice_ET", "dice_ET/val_dice_ET"]
-        # layout_dice_TC_merge = ["dice_TC/train_dice_TC", "dice_TC/val_dice_TC"]
-        # layout_dice_WT_merge = ["dice_WT/train_dice_WT", "dice_WT/val_dice_WT"] 
-        # layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
+        layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
         #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
 
         layout = {
@@ -122,17 +120,12 @@ class LitUNetCityModule(pl.LightningModule):
             "dice_merge": {
                 "dice": ["Multiline", layout_dice_merge],
             },
-            # "diceFG_merge": {
-            #     "diceFG": ["Multiline", layout_diceFG_merge],
-            # },
-            # "dice_p_cls_merge": {
-            #     "dice_p_cls": ["Multiline", layout_dice_p_cls_merge],
-            # },
-            # "Brats Dice Scores [ET=3, TC=1+3, WT=1+2+3]": {
-            #     "dice_ET": ["Multiline", layout_dice_ET_merge],
-            #     "dice_TC": ["Multiline", layout_dice_TC_merge],
-            #     "dice_WT": ["Multiline", layout_dice_WT_merge],
-            # },
+            "diceFG_merge": {
+                "diceFG": ["Multiline", layout_diceFG_merge],
+            },
+            "dice_p_cls_merge": {
+                "dice_p_cls": ["Multiline", layout_dice_p_cls_merge],
+            },
             # "assd_merge": {
             #     "assd": ["Multiline", layout_assd_merge],
             # },
@@ -142,8 +135,8 @@ class LitUNetCityModule(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
     
-    def training_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
+    def training_step(self, batch):
+        losses, logits, masks, preds = self._shared_step(batch, detach2cpu=True)
         loss = self._loss_merge(losses)
         metrics = self._shared_metric_step(loss, logits, masks, preds)
         self.log('loss/train_loss', loss.detach(), batch_size=masks.shape[0], prog_bar=True)
@@ -159,21 +152,17 @@ class LitUNetCityModule(pl.LightningModule):
             metrics = self._shared_cat_metrics(self.train_step_outputs)
 
             self.log("dice/train_dice", metrics["dice"], on_epoch=True)
-            # self.log("diceFG/train_diceFG", metrics["diceFG"], on_epoch=True)
-            # #Brats Dice Scores
-            # self.log("dice_TC/train_dice_TC", metrics["dice_TC"], on_epoch=True)
-            # self.log("dice_ET/train_dice_ET", metrics["dice_ET"], on_epoch=True)
-            # self.log("dice_WT/train_dice_WT", metrics["dice_WT"], on_epoch=True)
+            self.log("diceFG/train_diceFG", metrics["diceFG"], on_epoch=True)
 
-            # self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
+            self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
-            # for i, score in enumerate(metrics["dice_p_cls"]):
-            #     self.logger.experiment.add_scalar(f"dice_p_cls/train_dice_p_cls_{i}", score, self.current_epoch)
+            for i, score in enumerate(metrics["dice_p_cls"]):
+                self.logger.experiment.add_scalar(f"dice_p_cls/train_dice_p_cls_{i}", score, self.current_epoch)
             #self.log("assd/train_assd", metrics["assd"], on_epoch=True)
         self.train_step_outputs.clear()
     
-    def validation_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
+    def validation_step(self, batch):
+        losses, logits, masks, preds = self._shared_step(batch, detach2cpu=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -193,17 +182,12 @@ class LitUNetCityModule(pl.LightningModule):
                         self.log(f"loss_val/{m}", v, on_epoch=True)
 
             self.log("dice/val_dice", metrics["dice"], on_epoch=True)
-            # self.log("diceFG/val_diceFG", metrics["diceFG"], on_epoch=True)
+            self.log("diceFG/val_diceFG", metrics["diceFG"], on_epoch=True)
 
-            # #Brats Dice Scores
-            # self.log("dice_TC/val_dice_TC", metrics["dice_TC"], on_epoch=True)
-            # self.log("dice_ET/val_dice_ET", metrics["dice_ET"], on_epoch=True)
-            # self.log("dice_WT/val_dice_WT", metrics["dice_WT"], on_epoch=True)
+            self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
-            # self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
-
-            # for i, score in enumerate(metrics["dice_p_cls"]):
-            #     self.logger.experiment.add_scalar(f"dice_p_cls/val_dice_p_cls_{i}", score, self.current_epoch)
+            for i, score in enumerate(metrics["dice_p_cls"]):
+                self.logger.experiment.add_scalar(f"dice_p_cls/val_dice_p_cls_{i}", score, self.current_epoch)
             #self.log("assd/val_assd", metrics["assd"], on_epoch=True)
         self.val_step_outputs.clear()
 
@@ -228,7 +212,7 @@ class LitUNetCityModule(pl.LightningModule):
             
         return {"optimizer": optimizer}
         
-    def loss(self, logits, preds, masks, soft_masks):
+    def loss(self, logits, masks, soft_masks):
                     
         # Regression Loss (SOFT LOSS)
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
@@ -280,41 +264,41 @@ class LitUNetCityModule(pl.LightningModule):
     def _loss_merge(self, losses: dict):
         return sum(losses.values())
     
-    def _shared_step(self, batch, batch_idx, detach2cpu: bool =False):
+    def _shared_step(self, batch, detach2cpu: bool =False):
         imgs = batch['img']     # unpacking the batch
         masks = batch['seg']    # unpacking the batch
         soft_masks = batch['soft_seg']  # unpacking the batch
         logits = self.model(imgs)   # this implicitly calls the forward method
+
+        losses = self.loss(logits, masks, soft_masks)
     
         del imgs # delete the images tensor to free up memory
+        with torch.no_grad():
+            if not self.binary:
+                # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
+                #logits_ET = torch.argmax(logits,)
+                pass
+            if self.final_activation == 'sigmoid':
+                probs = self.sigmoid(logits)
 
-        if not self.binary:
-            # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
-            #logits_ET = torch.argmax(logits,)
-            pass
-        if self.final_activation == 'sigmoid':
-            probs = self.sigmoid(logits)
+            elif self.final_activation == "softmax":
+                probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
 
-        elif self.final_activation == "softmax":
-            probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
+            elif self.final_activation == "relu":
+                if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
+                    probs = self.relu(logits)/self.relu(logits).max()
+                else: 
+                    probs = self.relu(logits)
 
-        elif self.final_activation == "relu":
-            if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
-                probs = self.relu(logits)/self.relu(logits).max()
-            else: 
-                probs = self.relu(logits)
+            preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
 
-        preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
+            del probs
 
-        del probs
-
-        if detach2cpu:
-            masks = masks.detach().cpu()
-            soft_masks = soft_masks.detach().cpu()
-            logits = logits.detach().cpu()
-            preds = preds.detach().cpu()
-
-        losses = self.loss(logits,preds, masks, soft_masks)
+            if detach2cpu:
+                masks = masks.detach()
+                soft_masks = soft_masks.detach()
+                logits = logits.detach()
+                preds = preds.detach()
 
         # for name, param in self.model.named_parameters():
         #     print(name, param.requires_grad)
@@ -334,10 +318,18 @@ class LitUNetCityModule(pl.LightningModule):
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
+        diceFG = self.DiceFG(preds, masks)
+        if self.n_classes == 1:
+            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes + 1)
+        else:
+            dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes)
 
-        return {
+
+        return {    # does it make sense detaching all these scores and losses?
             "loss": loss.detach(), 
-            "dice": dice.detach(), 
+            "dice": dice.detach(),
+            "diceFG": diceFG.detach(),
+            "dice_p_cls": dice_p_cls.detach(),
             #"assd": assd
         }           
 
