@@ -82,6 +82,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
     parser.add_argument("-soft_dice_loss_w", type=float, default=0.0, help="Soft Dice Loss Weight Factor")
 
+    parser.add_argument("-threshold", type=float, default=0.5, choices = np.arange(0, 1,0.1),  help="Threshold for conversion of binary probabilities to predictions")
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
     parser.add_argument("-ds_factor", type = int, default = None, help ="What factor to downsample the images and ground truths by")
     #
