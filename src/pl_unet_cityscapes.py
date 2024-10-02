@@ -47,8 +47,11 @@ class LitUNetCityModule(pl.LightningModule):
         self.dilate = opt.dilate
         self.final_activation = opt.activation
 
+        self.bin_threshold = opt.threshold
+
         self.start_lr = opt.lr
         self.linear_end_factor = opt.lr_end_factor
+
         self.l2_reg_w = opt.l2_reg_w
         self.dsc_loss_w = opt.dsc_loss_w
         self.ce_loss_w = opt.ce_loss_w
@@ -106,6 +109,7 @@ class LitUNetCityModule(pl.LightningModule):
         layout_loss_val = ["loss_val/dice_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
         layout_loss_merge = ["loss/train_loss", "loss/val_loss"]
         layout_diceFG_merge = ["diceFG/train_diceFG", "diceFG/val_diceFG"]
+        layout_masked_dice_merge = ["dice_masked_gt_region/train_dice_masked_gt_region", "dice_masked_gt_region/val_dice_masked_gt_region"]
         layout_dice_merge = ["dice/train_dice", "dice/val_dice"]
         layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
         #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
@@ -123,6 +127,9 @@ class LitUNetCityModule(pl.LightningModule):
             },
             "diceFG_merge": {
                 "diceFG": ["Multiline", layout_diceFG_merge],
+            },
+            "dice_masked_gt_region_merge": {
+                "dice_masked_gt_region": ["Multiline", layout_masked_dice_merge],
             },
             "dice_p_cls_merge": {
                 "dice_p_cls": ["Multiline", layout_dice_p_cls_merge],
@@ -154,6 +161,7 @@ class LitUNetCityModule(pl.LightningModule):
 
             self.log("dice/train_dice", metrics["dice"], on_epoch=True)
             self.log("diceFG/train_diceFG", metrics["diceFG"], on_epoch=True)
+            self.log("dice_masked_gt_region/train_dice_masked_gt_region", metrics["dice_masked_gt_region"], on_epoch=True)
 
             self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -184,6 +192,7 @@ class LitUNetCityModule(pl.LightningModule):
 
             self.log("dice/val_dice", metrics["dice"], on_epoch=True)
             self.log("diceFG/val_diceFG", metrics["diceFG"], on_epoch=True)
+            self.log("dice_masked_gt_region/val_dice_masked_gt_region", metrics["dice_masked_gt_region"], on_epoch=True)
 
             self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -291,7 +300,7 @@ class LitUNetCityModule(pl.LightningModule):
                 else: 
                     probs = self.relu(logits)
 
-            preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
+            preds = (probs>self.bin_threshold).int()   # rounding up to 1 of larger than 0.5, rounding down otherwise
 
             del probs
 
@@ -320,6 +329,7 @@ class LitUNetCityModule(pl.LightningModule):
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
         diceFG = self.DiceFG(preds, masks)
+        dice_masked_gt_region = self.Dice(preds*masks, masks)
         if self.n_classes == 1:
             dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes + 1) # average=None returns dice per class
         else:
@@ -334,6 +344,7 @@ class LitUNetCityModule(pl.LightningModule):
             "loss": loss.detach(), 
             "dice": dice.detach(),
             "diceFG": diceFG.detach(),
+            "dice_masked_gt_region": dice_masked_gt_region.detach(),
             "dice_p_cls": dice_p_cls.detach(),
             #"assd": assd
         }           
