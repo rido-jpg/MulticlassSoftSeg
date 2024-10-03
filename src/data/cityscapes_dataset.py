@@ -17,11 +17,13 @@ from bids_dataset import brats_keys
 from skimage.measure import block_reduce
 from utils import brats_tools
 from utils import cs_tools
+import logging
+from PIL import Image, ImageFile
 
 cityscapes_root : Path = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/Cityscapes/'
 
 class CityscapesDataModule(pl.LightningDataModule):
-    def init(self, opt: Namespace = None):
+    def __init__(self, opt: Namespace = None):
         super().__init__()
         self.opt = opt
         self.batch_size = opt.bs
@@ -33,13 +35,13 @@ class CityscapesDataModule(pl.LightningDataModule):
         self.test_dataset = CityscapesDataset(self.opt, cityscapes_root, 'test', 'fine', 'semantic')
 
     def train_dataloader(self) -> torch.Any:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers, pin_memory=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers, pin_memory=True, timeout=300)
     
     def val_dataloader(self) -> torch.Any:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True, timeout=300)
 
     def test_dataloader(self) -> torch.Any:
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True, timeout=300)
 
 class CityscapesDataset(Dataset):
     def __init__(
@@ -81,14 +83,34 @@ class CityscapesDataset(Dataset):
             transforms
         )
 
+        # To store the original size of images for dynamic fallback
+        self.img_size = self.cs_ds[0][0].size
+
     def __len__(self):
         return len(self.cs_ds)
     
     def __getitem__(self, index) -> Any:
-        img, gt = self.cs_ds[index]
+        try:
+            img, gt = self.cs_ds[index]  # Attempt to load the image
+            img_size = img.size  # (width, height)
+            gt_size = gt.size  # (width, height) for ground truth
+            
+            # Ensure img_size and gt_size are consistent
+            if img_size != gt_size:
+                logging.warning(f"Image and GT size mismatch at index {index}: img size {img_size}, gt size {gt_size}")
+                gt = gt.resize(img_size)  # Resize ground truth to match image size
+                
+        except (OSError, IOError) as e:
+            logging.error(f"Error loading image at index {index}: {e}")
+            # If an error occurs, use the last valid image size, or a default size
+            img = Image.new("RGB", self.img_size)  # Create a blank image with the dynamic size
+            
+            reduced_gt = np.zeros(self.img_size, dtype=np.uint8)  # Default reduced ground truth
+            reduced_gt = reduced_gt.transpose(1, 0) # permute so it fits shape of other gts
+        else:
+            reduced_gt = cs_tools.reduce_classes(gt, 20)  # Reduces to binary case
 
-        img_array = np.array(img) # shape (H, W, C) where C = 3 because of RGB
-        reduced_gt = cs_tools.reduce_classes(gt, 20) # reduces to binary case, background is 0, traffic signs are 1; shape (H, W)
+        img_array = np.array(img)   # permutes PIL Image from (2048, 1024) to np array with shape (1024, 2048, 3) 
 
         img_array = np.transpose(img_array, (2, 0, 1)) # shape (C, H, W), where C=3 because of RGB
         reduced_gt = np.expand_dims(reduced_gt, axis=0) # shape (C, H, W), where C = 1
@@ -101,6 +123,7 @@ class CityscapesDataset(Dataset):
             soft_gt_tensor = torch.tensor(down_gt)
             gt_tensor = torch.round(soft_gt_tensor.clone().detach()).long()
 
+            # logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
             return data_dict
             
@@ -108,6 +131,8 @@ class CityscapesDataset(Dataset):
             img_tensor = torch.tensor(img_array).float()
             gt_tensor = torch.tensor(reduced_gt).long()
             soft_gt_tensor = brats_tools.soften_gt(gt_tensor.clone().detach(), self.sigma)
+
+            # logging.info(f"Returning tensors for index {index}: img shape {img_tensor.shape}, gt shape {gt_tensor.shape}")
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
         return data_dict
 
