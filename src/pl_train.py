@@ -324,7 +324,7 @@ if __name__ == '__main__':
         callbacks=callbacks, 
         #profiler=profiler,
         profiler='simple',
-        inference_mode=False,
+        inference_mode=True,    # optimizes performance during evaluation phases, such as validation, testing, and prediction, by disabling gradient calculations -> makes using torch.no_grad obsolete
         accumulate_grad_batches=opt.grad_accum,
     )
 
