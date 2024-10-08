@@ -142,9 +142,9 @@ class LitUNetModule(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch):
         torch.set_grad_enabled(True)
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
+        losses, logits, masks, preds = self._shared_step(batch)
         loss = self._loss_merge(losses)
         metrics = self._shared_metric_step(loss, logits, masks, preds)
         self.log('loss/train_loss', loss.detach(), batch_size=masks.shape[0], prog_bar=True)
@@ -173,8 +173,8 @@ class LitUNetModule(pl.LightningModule):
             #self.log("assd/train_assd", metrics["assd"], on_epoch=True)
         self.train_step_outputs.clear()
     
-    def validation_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx, detach=True)
+    def validation_step(self, batch):
+        losses, logits, masks, preds = self._shared_step(batch, detach=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -334,7 +334,7 @@ class LitUNetModule(pl.LightningModule):
     def _loss_merge(self, losses: dict):
         return sum(losses.values())
     
-    def _shared_step(self, batch, batch_idx, detach: bool =False):
+    def _shared_step(self, batch, detach: bool =False):
         imgs = batch['img']     # unpacking the batch
         masks = batch['seg']    # unpacking the batch
         soft_masks = batch['soft_seg']  # unpacking the batch
