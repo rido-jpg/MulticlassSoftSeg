@@ -81,8 +81,7 @@ class LitUNetModule(pl.LightningModule):
         self.SoftDice = MemoryEfficientSoftDiceLoss(apply_nonlin= self.softmax,batch_dice=False, do_bg=True, smooth=1e-5, ddp=False)
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
         self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
-        #self.dice_loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True, batch=True) # Monai Dice Loss
-        #self.dice_loss = DiceLoss(to_onehot_y=True ,softmax=True) # Monai Dice Loss
+        self.MonaiDiceBratsLoss = DiceLoss() 
         self.Dice = torchmetrics.Dice()
         self.DiceFG = torchmetrics.Dice(ignore_index=0) #ignore_index=0 means we ignore the background class
         #self.Dice_p_cls = torchmetrics.Dice(average=None, num_classes=self.n_classes)   # average='none' returns dice per class
@@ -144,6 +143,7 @@ class LitUNetModule(pl.LightningModule):
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
+        torch.set_grad_enabled(True)
         losses, logits, masks, preds = self._shared_step(batch, batch_idx)
         loss = self._loss_merge(losses)
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -174,7 +174,7 @@ class LitUNetModule(pl.LightningModule):
         self.train_step_outputs.clear()
     
     def validation_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx, detach2cpu=True)
+        losses, logits, masks, preds = self._shared_step(batch, batch_idx, detach=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -209,7 +209,7 @@ class LitUNetModule(pl.LightningModule):
         self.val_step_outputs.clear()
 
     def configure_optimizers(self):
-        #optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr, weight_decay=1e-5)
+        #optimizer = torch.optim.Adam(self.parameters(), lr=self.start_lr)
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.start_lr, weight_decay=self.l2_reg_w)
         scheduler = lr_scheduler.LinearLR(
             optimizer=optimizer, start_factor=1.0, end_factor=self.linear_end_factor, total_iters=self.epochs
@@ -222,7 +222,6 @@ class LitUNetModule(pl.LightningModule):
         return {"optimizer": optimizer}
         
     def loss(self, logits, preds, masks, soft_masks):
-        masks = masks.squeeze(1)    # remove the channel dimension for CrossEntropyLoss
                     
         # Regression Loss (SOFT LOSS)
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
@@ -239,16 +238,29 @@ class LitUNetModule(pl.LightningModule):
         if self.ce_loss_w == 0 or self.hard_loss_w == 0:
             ce_loss = torch.tensor(0.0)
         else:
-            ce_loss = self.CEL(logits, masks) * self.ce_loss_w * self.hard_loss_w
+            ce_loss = self.CEL(logits, masks.squeeze(1)) * self.ce_loss_w * self.hard_loss_w    # underlying NLLLoss can't handle mixed precision on CPU I guess (does mixed precision exist on cpu?)
 
+        dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0) # have to find a solution to use logits for loss function as preds are not backpropagatable
         # Brats Dice Losses for subregions equally weighted
-        if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
-            dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
-        else:
-            dice_ET_loss = (1 - self.Dice((preds == 3), (masks == 3))) * self.dsc_loss_w * self.hard_loss_w
-            dice_TC_loss = (1 - self.Dice((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))) * self.dsc_loss_w * self.hard_loss_w
-            dice_WT_loss = (1 - self.Dice((preds > 0), (masks > 0))) * self.dsc_loss_w * self.hard_loss_w
+        # if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
+        #     dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
+        # else:
+        #     # can't use class indices for loss function as they are not backpropagatable
 
+        #     preds_ET = (preds == 3)
+        #     preds_TC = ((preds == 1) | (preds == 3))
+        #     preds_WT = (preds > 0)
+
+        #     gt_ET = (masks == 3)
+        #     gt_TC = ((masks == 1) | (masks == 3))
+        #     gt_WT = (masks > 0)
+
+        #     dice_ET_loss = self.MonaiDiceBratsLoss(preds_ET, gt_ET) * self.dsc_loss_w * self.hard_loss_w
+        #     dice_TC_loss = self.MonaiDiceBratsLoss(preds_TC, gt_TC) * self.dsc_loss_w * self.hard_loss_w
+        #     dice_WT_loss = self.MonaiDiceBratsLoss(preds_WT, gt_WT) * self.dsc_loss_w * self.hard_loss_w
+        #     print(f"dice_ET_loss {dice_ET_loss} and shape {dice_ET_loss.shape}")
+        #     print(f"dice_TC_loss {dice_TC_loss} and shape {dice_TC_loss.shape}")
+        #     print(f"dice_WT_loss {dice_WT_loss} and shape {dice_WT_loss.shape}")
 
         # Brats Soft Dice Losses for subregions equally weighted
         if self.soft_dice_loss_w == 0:
@@ -264,47 +276,47 @@ class LitUNetModule(pl.LightningModule):
             gt_et = (masks == 3).unsqueeze(1)
             gt_wt = (masks > 0).unsqueeze(1)
 
-            # masks_ET = ((masks == 3)).unsqueeze(1)
-            # masks_TC = ((masks == 1) | (masks == 3)).unsqueeze(1)
-            # masks_WT = (masks > 0).unsqueeze(1)
+        #     # masks_ET = ((masks == 3)).unsqueeze(1)
+        #     # masks_TC = ((masks == 1) | (masks == 3)).unsqueeze(1)
+        #     # masks_WT = (masks > 0).unsqueeze(1)
 
-            # logits_ET_FG = logits[:, 3, ...].unsqueeze(1)
-            # logits_ET_BG = torch.maximum(torch.maximum(logits[:, 0], logits[:, 1]), logits[:, 2]).unsqueeze(1)
-            # logits_ET = torch.cat([logits_ET_BG, logits_ET_FG], dim=1)
+        #     # logits_ET_FG = logits[:, 3, ...].unsqueeze(1)
+        #     # logits_ET_BG = torch.maximum(torch.maximum(logits[:, 0], logits[:, 1]), logits[:, 2]).unsqueeze(1)
+        #     # logits_ET = torch.cat([logits_ET_BG, logits_ET_FG], dim=1)
 
-            # logits_TC_FG = torch.maximum(logits[:, 1], logits[:, 3]).unsqueeze(1)
-            # logits_TC_BG = torch.maximum(logits[:, 0], logits[:, 2]).unsqueeze(1)
-            # logits_TC = torch.cat([logits_TC_BG, logits_TC_FG], dim=1)
+        #     # logits_TC_FG = torch.maximum(logits[:, 1], logits[:, 3]).unsqueeze(1)
+        #     # logits_TC_BG = torch.maximum(logits[:, 0], logits[:, 2]).unsqueeze(1)
+        #     # logits_TC = torch.cat([logits_TC_BG, logits_TC_FG], dim=1)
 
-            # logits_WT_FG = torch.maximum(torch.maximum(logits[:, 1], logits[:, 2]), logits[:, 3]).unsqueeze(1)
-            # logits_WT_BG = logits[:, 0].unsqueeze(1)
-            # logits_WT = torch.cat([logits_WT_BG, logits_WT_FG], dim=1)
+        #     # logits_WT_FG = torch.maximum(torch.maximum(logits[:, 1], logits[:, 2]), logits[:, 3]).unsqueeze(1)
+        #     # logits_WT_BG = logits[:, 0].unsqueeze(1)
+        #     # logits_WT = torch.cat([logits_WT_BG, logits_WT_FG], dim=1)
             
-            # probs_ET = self.softmax(logits_ET)
-            # probs_TC = self.softmax(logits_TC)
-            # probs_WT = self.softmax(logits_WT)
+        #     # probs_ET = self.softmax(logits_ET)
+        #     # probs_TC = self.softmax(logits_TC)
+        #     # probs_WT = self.softmax(logits_WT)
 
-            # del logits_ET, logits_ET_FG, logits_ET_BG, logits_TC, logits_TC_FG, logits_TC_BG, logits_WT, logits_WT_FG, logits_WT_BG
+        #     # del logits_ET, logits_ET_FG, logits_ET_BG, logits_TC, logits_TC_FG, logits_TC_BG, logits_WT, logits_WT_FG, logits_WT_BG
 
-            # soft_dice_ET_loss = (1 - self.SoftDice(logits_et, gt_et)) * self.soft_dice_loss_w
-            # soft_dice_TC_loss = (1 - self.SoftDice(logits_tc, gt_tc)) * self.soft_dice_loss_w
-            # soft_dice_WT_loss = (1 - self.SoftDice(logits_wt, gt_wt)) * self.soft_dice_loss_w
+            soft_dice_ET_loss = (1 - self.SoftDice(logits_et, gt_et)) * self.soft_dice_loss_w
+            soft_dice_TC_loss = (1 - self.SoftDice(logits_tc, gt_tc)) * self.soft_dice_loss_w
+            soft_dice_WT_loss = (1 - self.SoftDice(logits_wt, gt_wt)) * self.soft_dice_loss_w
 
-            soft_dice_ET_loss = self.SoftDice(logits_et, gt_et) * self.soft_dice_loss_w
-            soft_dice_TC_loss = self.SoftDice(logits_tc, gt_tc) * self.soft_dice_loss_w
-            soft_dice_WT_loss = self.SoftDice(logits_wt, gt_wt) * self.soft_dice_loss_w
+        #     soft_dice_ET_loss = self.SoftDice(logits_et, gt_et) * self.soft_dice_loss_w
+        #     soft_dice_TC_loss = self.SoftDice(logits_tc, gt_tc) * self.soft_dice_loss_w
+        #     soft_dice_WT_loss = self.SoftDice(logits_wt, gt_wt) * self.soft_dice_loss_w
 
-            # del logits_et, logits_tc, logits_wt, gt_et, gt_tc, gt_wt
+        #     # del logits_et, logits_tc, logits_wt, gt_et, gt_tc, gt_wt
 
-            # del probs_ET, probs_TC, probs_WT, masks_ET, masks_TC, masks_WT
+        #     # del probs_ET, probs_TC, probs_WT, masks_ET, masks_TC, masks_WT
 
-        # # Weight Regularization
-        # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
+        # # # Weight Regularization
+        # # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
 
-        # for param in self.model.parameters():
-        #     l2_reg += torch.norm(param).to(self.device, non_blocking=True)
+        # # for param in self.model.parameters():
+        # #     l2_reg += torch.norm(param).to(self.device, non_blocking=True)
 
-        l2_reg = torch.tensor(0.0)    
+        # l2_reg = torch.tensor(0.0)    
 
         return {
             "adw_loss": adw_loss,
@@ -316,13 +328,13 @@ class LitUNetModule(pl.LightningModule):
             "dice_ET_loss": dice_ET_loss,
             "dice_TC_loss": dice_TC_loss,
             "dice_WT_loss": dice_WT_loss,
-            "l2_reg_loss": (l2_reg * self.l2_reg_w),
+            # "l2_reg_loss": (l2_reg * self.l2_reg_w),
         }
     
     def _loss_merge(self, losses: dict):
         return sum(losses.values())
     
-    def _shared_step(self, batch, batch_idx, detach2cpu: bool =False):
+    def _shared_step(self, batch, batch_idx, detach: bool =False):
         imgs = batch['img']     # unpacking the batch
         masks = batch['seg']    # unpacking the batch
         soft_masks = batch['soft_seg']  # unpacking the batch
@@ -344,11 +356,12 @@ class LitUNetModule(pl.LightningModule):
             else: 
                 probs = self.relu(logits)
 
-        preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability
+        preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability -> argmax not differentiable
+        #_, preds = torch.max(probs, dim=1, keepdim=True)    # getting the class with the highest probability -> also not differentiable, just use for eval
 
         del probs
 
-        if detach2cpu:
+        if detach:
             masks = masks.detach()
             soft_masks = soft_masks.detach()
             logits = logits.detach()
