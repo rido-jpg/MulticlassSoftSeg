@@ -4,7 +4,9 @@ import lightning.pytorch as pl
 from argparse import Namespace
 from lightning.pytorch.callbacks import LearningRateMonitor
 from pl_unet import LitUNetModule
+from pl_unet_cityscapes import LitUNetCityModule
 from data.bids_dataset import BidsDataModule, brats_keys, modalities
+from data.cityscapes_dataset import CityscapesDataModule
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 from monai.transforms import (
@@ -24,9 +26,27 @@ import numpy as np
 import torch
 import math
 
+img_key = brats_keys[0]
+
+augmentations = Compose(
+    [   
+        #RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
+        RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest", "nearest"]),
+        #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
+        RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
+        RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
+        RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=1),
+        RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=2),
+        #RandScaleIntensityd(keys=img_key, factors=0.1, prob=1.0),
+        #RandShiftIntensityd(keys=img_key, offsets=0.1, prob=1.0),
+    ]
+)
+
 def parse_train_param(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
+
+    parser.add_argument("-dataset", type=str, default= 'brats', choices = ['brats', 'cityscapes'], help = 'Which dataset to train the model on')
 
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
     parser.add_argument("-epochs", type=int, default=400, help="Number of epochs")
@@ -38,7 +58,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-matmul_precision", type=str, default='high', choices=['highest', 'high', 'medium'], help="Precision for Matrix multiplications")
     parser.add_argument("-val_every_n_epoch", type=int, default=1, help="Validation every n epochs")
 
-    parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
+    parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu", "sigmoid"], help="Final activation function")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
@@ -62,7 +82,9 @@ def parse_train_param(parser=None):
     parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
     parser.add_argument("-soft_dice_loss_w", type=float, default=0.0, help="Soft Dice Loss Weight Factor")
 
+    parser.add_argument("-threshold", type=float, default=0.5, choices = np.arange(0, 1,0.1),  help="Threshold for conversion of binary probabilities to predictions")
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise")
+    parser.add_argument("-ds_factor", type = int, default = None, help ="What factor to downsample the images and ground truths by")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     parser.add_argument("-test_run", action="store_true", default=False, help="Test run with small batch size -> using fast_dev_run of pl.Trainer")
@@ -142,7 +164,6 @@ def get_trainer_callbacks(bestf1: bool = True):
     assert len(callbacks) > 0, "no callbacks defined"
     return callbacks
 
-
 if __name__ == '__main__':
 
     pl.seed_everything(42)
@@ -182,54 +203,60 @@ if __name__ == '__main__':
     else:
         opt.precision = '32-true'
 
+    if opt.no_augmentations:
+        augmentations = None
+
+    if opt.dataset == 'brats':
+        
+        data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
+        
+        if opt.sample_subset:
+            data_dir = data_dir + '/Sample-Subset'
+        
+        n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
+        out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
+        
+        if opt.contrast == 'multimodal':
+            in_channels = 4
+        else:
+            in_channels = 1
+
+        if n_classes == 2:
+            binary = True
+        else:
+            binary = False
+        
+        data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
+
+        model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
+
+    elif opt.dataset == 'cityscapes':
+        opt.do2D = True
+
+        opt.activation = 'sigmoid'
+
+        in_channels = 3 # rgb channels
+
+        n_classes = 1   #  only traffic signs -> 1 output channel is enough 
+        out_channels = n_classes
+
+        binary = True
+
+        data_module = CityscapesDataModule(opt = opt)
+
+        model = LitUNetCityModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
+
+
     print("Train with arguments")
     print(opt)
     print()
 
     # Set device automatically handled by PyTorch Lightning
-    data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge'
-    if opt.sample_subset:
-        data_dir = data_dir + '/Sample-Subset'
-    n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
-    out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
-    img_key = brats_keys[0]
 
     torch.set_float32_matmul_precision(opt.matmul_precision)
 
-    if opt.contrast == 'multimodal':
-        in_channels = 4
-    else:
-        in_channels = 1
-
-    if n_classes == 2:
-        binary = True
-    else:
-        binary = False
-
-
-    augmentations = Compose(
-        [   
-            #RandAdjustContrastd(keys=img_key, prob=0.5, gamma=(0.7,1.5)),
-            RandRotated(keys=brats_keys, range_x=math.radians(30), range_y=math.radians(30), range_z=math.radians(30), prob=0.3,keep_size=True, mode =["bilinear", "nearest", "nearest"]),
-            #RandAffined(keys=brats_keys, prob=0.75, translate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1), mode =["bilinear", "nearest"]),
-            RandGaussianNoised(keys=img_key, prob=0.1, mean=0.0, std=0.1),
-            RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=0),
-            RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=1),
-            RandFlipd(keys=brats_keys, prob=0.5, spatial_axis=2),
-            #RandScaleIntensityd(keys=img_key, factors=0.1, prob=1.0),
-            #RandShiftIntensityd(keys=img_key, offsets=0.1, prob=1.0),
-        ]
-    )
-
-    if opt.no_augmentations:
-        augmentations = None
-
-    model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
-
     # Compile the model
     #model = torch.compile(model)
-
-    data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
     
     ## Set up Model Name
     model_name='3D_UNet'
@@ -241,6 +268,7 @@ if __name__ == '__main__':
     n_sigma = str("")                   # sigma for Gaussian Noise
     n_grad_accum = str("")              # gradient accumulation
     n_dilate = str("")                  # number of voxel neighbor layers to dilate to for soft masks
+    n_down = str("")                    # downsampling factor
 
     if opt.do2D:
         model_name='2D_UNet'
@@ -254,6 +282,9 @@ if __name__ == '__main__':
 
     if opt.sigma != 0:
         n_sigma = str(f"_sigma_{opt.sigma}")
+
+    if opt.ds_factor is not None:
+        n_down = str(f"_down_factor_{opt.ds_factor}")
 
     if opt.dilate != 0:
         n_dilate = str(f"_dilate_{opt.dilate}")
@@ -274,10 +305,10 @@ if __name__ == '__main__':
                 n_loss_w = str(f"{n_loss_w}_{substring}_{value}")
 
     #suffix = str(f"_bs_{opt.bs}_epochs_{opt.epochs}_dim_{opt.dim}_precision_{opt.precision}_matmulprec_{opt.matmul_precision}_{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}{n_aug}")
-    suffix = str(f"{n_loss_w}{n_grad_accum}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}")
+    suffix = str(f"{n_loss_w}{n_grad_accum}{n_down}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}")
 
     #Directory for logs
-    filepath_logs = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs'
+    filepath_logs = f"/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/{opt.dataset}"
 
     # Determine next version number
     #model_name = model.__class__.__name__

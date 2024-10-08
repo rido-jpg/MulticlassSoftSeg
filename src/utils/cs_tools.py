@@ -14,7 +14,7 @@ def reduce_classes(gt : np.ndarray, class_id: int = 20):
         else:
             raise Exception(f"gt should be of shape (H, W), but has shape {gt.shape}")
     else:
-        gt = np.array(gt)
+        gt = np.array(gt)   # permutes shape from (2048, 1024) to (1024, 2048)
         if gt.ndim == 2:
             gt = (gt == class_id)
             gt.dtype = np.uint8
