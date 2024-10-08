@@ -319,10 +319,12 @@ if __name__ == '__main__':
         log_every_n_steps=10, 
         accelerator='gpu',
         devices = -1,
+        detect_anomaly=False,
         logger=logger,
         callbacks=callbacks, 
         #profiler=profiler,
         profiler='simple',
+        inference_mode=False,
         accumulate_grad_batches=opt.grad_accum,
     )
 
