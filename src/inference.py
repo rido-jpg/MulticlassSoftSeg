@@ -73,6 +73,8 @@ relu = nn.ReLU()
 
 if __name__ == '__main__':
 
+    torch.set_grad_enabled(False)
+
     parser = parse_inf_param()
     conf = parser.parse_args()
 
