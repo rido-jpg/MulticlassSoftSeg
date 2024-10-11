@@ -82,7 +82,7 @@ class LitUNetModule(pl.LightningModule):
         self.SoftDice = MemoryEfficientSoftDiceLoss(apply_nonlin= self.softmax,batch_dice=False, do_bg=True, smooth=1e-5, ddp=False)
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
         self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
-        self.MonaiDiceBratsLoss = DiceLoss(softmax=True) 
+        self.MonaiDiceBratsLoss = DiceLoss(softmax=True, to_onehot_y=True) 
         self.Dice = torchmetrics.Dice()
         self.DiceFG = torchmetrics.Dice(ignore_index=0) #ignore_index=0 means we ignore the background class
         #self.Dice_p_cls = torchmetrics.Dice(average=None, num_classes=self.n_classes)   # average='none' returns dice per class
@@ -246,19 +246,68 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
+            h, w, d = self.opt.resize
+            tensor_shape = [self.opt.bs, 2, h, w, d]
+            print(f" tensor shape: {tensor_shape}")
             brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
+
+            logits_ET = torch.zeros(tensor_shape)
+            logits_TC = torch.zeros(tensor_shape)
+            logits_WT = torch.zeros(tensor_shape)
+
+            print(f"shape of empty logits_ET: {logits_ET.shape}")
+            print(f"shape of empty logits_TC: {logits_TC.shape}")
+            print(f"shape of empty logits_WT: {logits_WT.shape}")
+
+            # logits_ET = self._prepare_region_logits(logits, brats_regions['ET'])
+            # logits_TC = self._prepare_region_logits(logits, brats_regions['TC'])
+            # logits_WT = self._prepare_region_logits(logits, brats_regions['WT'])
+
+            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            logits_ET = self._prepare_region_logits(logits, brats_regions['ET'])
-            logits_TC = self._prepare_region_logits(logits, brats_regions['TC'])
-            logits_WT = self._prepare_region_logits(logits, brats_regions['WT'])
+            print(f"logits_ET_FG shape {logits_ET_FG.shape}")
+            print(f"logits_ET_BG shape {logits_ET_BG.shape}")
+            
+            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            gt_TC = ((masks == 1) | (masks == 3))
-            gt_ET = (masks == 3)
-            gt_WT = (masks > 0)
+            print(f"logits_TC_FG shape {logits_TC_FG.shape}")
+            print(f"logits_TC_BG shape {logits_TC_BG.shape}")
 
-            dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET) * self.dsc_loss_w * self.hard_loss_w
-            dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC) * self.dsc_loss_w * self.hard_loss_w
-            dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT) * self.dsc_loss_w * self.hard_loss_w
+            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+
+            print(f"logits_WT_FG shape {logits_WT_FG.shape}")
+            print(f"logits_WT_BG shape {logits_WT_BG.shape}")
+
+            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+
+            gt_ET_FG = (masks == 3).long()
+            gt_TC_FG = (((masks == 1) | (masks == 3))).long()
+            gt_WT_FG = (masks > 0).long()
+
+            print(f"shape of gt_ET_FG: {gt_ET_FG.shape}")
+            print(f"shape of gt_TC_FG: {gt_TC_FG.shape}")
+            print(f"shape of gt_WT_FG: {gt_WT_FG.shape}")
+
+            # gt_ET = F.one_hot(gt_ET_FG, num_classes=2)
+            # gt_TC = F.one_hot(gt_TC_FG, num_classes=2)
+            # gt_WT = F.one_hot(gt_WT_FG, num_classes=2)
+
+            # print(f"shape of gt_ET: {gt_ET.shape}")
+            # print(f"shape of gt_TC: {gt_TC.shape}")
+            # print(f"shape of gt_WT: {gt_WT.shape}")
+
+            dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET_FG) * self.dsc_loss_w * self.hard_loss_w
+            dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC_FG) * self.dsc_loss_w * self.hard_loss_w
+            dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
+
+            print(f"dice_ET_loss: {dice_ET_loss}")
+            print(f"dice_TC_loss: {dice_TC_loss}")
+            print(f"dice_WT_loss: {dice_WT_loss}")
 
         # Brats Soft Dice Losses for subregions equally weighted
         if self.soft_dice_loss_w == 0:
