@@ -63,6 +63,9 @@ class LitUNetModule(pl.LightningModule):
         self.dim = opt.dim
         self.groups = opt.groups    # number of resnet block groups
 
+        h, w, d = self.opt.resize
+        self.tensor_shape = [self.opt.bs, 2, h, w, d]
+
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
             self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
@@ -246,86 +249,99 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            h, w, d = self.opt.resize
-            tensor_shape = [self.opt.bs, 2, h, w, d]
-            print(f" tensor shape: {tensor_shape}")
-            brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
-
-            logits_ET = torch.zeros(tensor_shape)
-            logits_TC = torch.zeros(tensor_shape)
-            logits_WT = torch.zeros(tensor_shape)
-
-            print(f"shape of empty logits_ET: {logits_ET.shape}")
-            print(f"shape of empty logits_TC: {logits_TC.shape}")
-            print(f"shape of empty logits_WT: {logits_WT.shape}")
-
-            # logits_ET = self._prepare_region_logits(logits, brats_regions['ET'])
-            # logits_TC = self._prepare_region_logits(logits, brats_regions['TC'])
-            # logits_WT = self._prepare_region_logits(logits, brats_regions['WT'])
+            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
 
             logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
             logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            print(f"logits_ET_FG shape {logits_ET_FG.shape}")
-            print(f"logits_ET_BG shape {logits_ET_BG.shape}")
-            
             logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
             logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            print(f"logits_TC_FG shape {logits_TC_FG.shape}")
-            print(f"logits_TC_BG shape {logits_TC_BG.shape}")
-
             logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
             logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
-
-            print(f"logits_WT_FG shape {logits_WT_FG.shape}")
-            print(f"logits_WT_BG shape {logits_WT_BG.shape}")
 
             logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
             logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
             logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
+            # checking what is backpropagated -> does it go through the og logits?
+            print(f"logits_ET.backward(): {logits_ET.backward()}")
+            print(f"logits_TC.backward(): {logits_TC.backward()}")
+            print(f"logits_WT.backward(): {logits_WT.backward()}")
+
             gt_ET_FG = (masks == 3).long()
             gt_TC_FG = (((masks == 1) | (masks == 3))).long()
             gt_WT_FG = (masks > 0).long()
-
-            print(f"shape of gt_ET_FG: {gt_ET_FG.shape}")
-            print(f"shape of gt_TC_FG: {gt_TC_FG.shape}")
-            print(f"shape of gt_WT_FG: {gt_WT_FG.shape}")
-
-            # gt_ET = F.one_hot(gt_ET_FG, num_classes=2)
-            # gt_TC = F.one_hot(gt_TC_FG, num_classes=2)
-            # gt_WT = F.one_hot(gt_WT_FG, num_classes=2)
-
-            # print(f"shape of gt_ET: {gt_ET.shape}")
-            # print(f"shape of gt_TC: {gt_TC.shape}")
-            # print(f"shape of gt_WT: {gt_WT.shape}")
 
             dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET_FG) * self.dsc_loss_w * self.hard_loss_w
             dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC_FG) * self.dsc_loss_w * self.hard_loss_w
             dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
 
-            print(f"dice_ET_loss: {dice_ET_loss}")
-            print(f"dice_TC_loss: {dice_TC_loss}")
-            print(f"dice_WT_loss: {dice_WT_loss}")
-
         # Brats Soft Dice Losses for subregions equally weighted
         if self.soft_dice_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
-            brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
+            ## APPROACH 1 ##
+
+            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+
+            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            logits_et = self._prepare_region_logits(logits, brats_regions['ET'])
-            logits_tc = self._prepare_region_logits(logits, brats_regions['TC'])
-            logits_wt = self._prepare_region_logits(logits, brats_regions['WT'])
+            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            gt_tc = ((masks == 1) | (masks == 3))
-            gt_et = (masks == 3)
-            gt_wt = (masks > 0)
+            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-            soft_dice_ET_loss = (1 - self.SoftDice(logits_et, gt_et)) * self.soft_dice_loss_w
-            soft_dice_TC_loss = (1 - self.SoftDice(logits_tc, gt_tc)) * self.soft_dice_loss_w
-            soft_dice_WT_loss = (1 - self.SoftDice(logits_wt, gt_wt)) * self.soft_dice_loss_w
+            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+
+            # checking what is backpropagated -> does it go through the og logits?
+            print(f"logits_ET.backward(): {logits_ET.backward()}")
+            print(f"logits_TC.backward(): {logits_TC.backward()}")
+            print(f"logits_WT.backward(): {logits_WT.backward()}")
+
+
+            # # APPROACH 2 ##
+            # logits_ET = logits.clone()
+            # logits_TC = logits.clone()
+            # logits_WT = logits.clone()
+
+            # logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            # logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+            
+            # logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            # logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+
+            # logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            # logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+
+            # logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            # logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            # logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+
+            # print(f"logits_ET.backward(): {logits_ET.backward()}")
+            # print(f"logits_TC.backward(): {logits_TC.backward()}")
+            # print(f"logits_WT.backward(): {logits_WT.backward()}")
+
+
+            gt_ET_FG = (masks == 3).long().squeeze(1)
+            gt_TC_FG = (((masks == 1) | (masks == 3))).long().squeeze(1)
+            gt_WT_FG = (masks > 0).long().squeeze(1)
+
+            gt_ET = F.one_hot(gt_ET_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+            gt_TC = F.one_hot(gt_TC_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+            gt_WT = F.one_hot(gt_WT_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+
+            soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w
+            soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w
+            soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w
 
 
         # # # Weight Regularization
@@ -375,8 +391,6 @@ class LitUNetModule(pl.LightningModule):
                 probs = self.relu(logits)
 
         preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability -> argmax not differentiable
-        #_, preds = torch.max(probs, dim=1, keepdim=True)    # getting the class with the highest probability -> also not differentiable, just use for eval
-
         del probs
 
         if detach:
@@ -387,15 +401,16 @@ class LitUNetModule(pl.LightningModule):
 
         losses = self.loss(logits,preds, masks, soft_masks)
 
+        # #printing for every param if requires_grad is True
         # for name, param in self.model.named_parameters():
         #     print(name, param.requires_grad)
 
-        #printing when requires_grad is False -> no backpropagation
-        for k, v in losses.items():
-            if v is not isinstance(v, bool):
-                if v.requires_grad == False and v != 0:
-                    print(f"{k} = {v} requires grad:")
-                    print(f"{v.requires_grad}")
+        # #printing when requires_grad is False -> no backpropagation
+        # for k, v in losses.items():
+        #     if v is not isinstance(v, bool):
+        #         if v.requires_grad == False and v != 0:
+        #             print(f"{k} = {v} requires grad:")
+        #             print(f"{v.requires_grad}")
 
         return losses, logits, masks, preds
     
