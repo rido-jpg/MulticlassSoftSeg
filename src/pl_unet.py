@@ -31,6 +31,7 @@ sys.path.append(str(file.parents[2]))
 from utils.brats_tools import soften_gt
 
 
+
 class LitUNetModule(pl.LightningModule):
     def __init__(self, opt: Namespace, in_channels: int, out_channels: int, binary: bool=False, n_classes: int=4):
         super(LitUNetModule, self).__init__()
@@ -62,6 +63,12 @@ class LitUNetModule(pl.LightningModule):
         self.dim = opt.dim
         self.groups = opt.groups    # number of resnet block groups
 
+        h, w, d = self.opt.resize
+        self.tensor_shape = [self.opt.bs, 2, h, w, d]
+        self.img_vol = h*w*d
+
+        self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
+
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
             self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
@@ -81,7 +88,7 @@ class LitUNetModule(pl.LightningModule):
         self.SoftDice = MemoryEfficientSoftDiceLoss(apply_nonlin= self.softmax,batch_dice=False, do_bg=True, smooth=1e-5, ddp=False)
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
         self.ADWL = AdaptiveWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)  # standard implementation
-        self.MonaiDiceBratsLoss = DiceLoss() 
+        self.MonaiDiceBratsLoss = DiceLoss(softmax=True, to_onehot_y=True) 
         self.Dice = torchmetrics.Dice()
         self.DiceFG = torchmetrics.Dice(ignore_index=0) #ignore_index=0 means we ignore the background class
         #self.Dice_p_cls = torchmetrics.Dice(average=None, num_classes=self.n_classes)   # average='none' returns dice per class
@@ -109,6 +116,8 @@ class LitUNetModule(pl.LightningModule):
         layout_dice_TC_merge = ["dice_TC/train_dice_TC", "dice_TC/val_dice_TC"]
         layout_dice_WT_merge = ["dice_WT/train_dice_WT", "dice_WT/val_dice_WT"] 
         layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
+        layout_mse_merge = ["mse_score/train_mse_score", "mse_score/val_mse_score"]
+        layout_fmse_merge = ["fmse_score/train_fmse_score", "fmse_score/val_fmse_score"]
         #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
 
         layout = {
@@ -133,6 +142,10 @@ class LitUNetModule(pl.LightningModule):
                 "dice_TC": ["Multiline", layout_dice_TC_merge],
                 "dice_WT": ["Multiline", layout_dice_WT_merge],
             },
+            "MSE Scores": {
+                "mse_score": ["Multiline", layout_mse_merge],
+                "fmse_score": ["Multiline", layout_fmse_merge],
+            },
             # "assd_merge": {
             #     "assd": ["Multiline", layout_assd_merge],
             # },
@@ -142,16 +155,16 @@ class LitUNetModule(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch):
         torch.set_grad_enabled(True)
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx)
+        losses, logits, masks, preds = self._shared_step(batch)
         loss = self._loss_merge(losses)
         metrics = self._shared_metric_step(loss, logits, masks, preds)
         self.log('loss/train_loss', loss.detach(), batch_size=masks.shape[0], prog_bar=True)
 
         for k, v in losses.items():
             self.log(f"loss_train/{k}", v.detach(), batch_size=masks.shape[0], prog_bar=False)
-
+        
         self._shared_metric_append(metrics, self.train_step_outputs)
         return loss
 
@@ -165,6 +178,9 @@ class LitUNetModule(pl.LightningModule):
             self.log("dice_TC/train_dice_TC", metrics["dice_TC"], on_epoch=True)
             self.log("dice_ET/train_dice_ET", metrics["dice_ET"], on_epoch=True)
             self.log("dice_WT/train_dice_WT", metrics["dice_WT"], on_epoch=True)
+            #MSE
+            self.log("mse_score/train_mse_score", metrics["mse_score"], on_epoch=True)
+            self.log("fmse_score/train_fmse_score", metrics["fmse_score"], on_epoch=True)
 
             self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -173,8 +189,8 @@ class LitUNetModule(pl.LightningModule):
             #self.log("assd/train_assd", metrics["assd"], on_epoch=True)
         self.train_step_outputs.clear()
     
-    def validation_step(self, batch, batch_idx):
-        losses, logits, masks, preds = self._shared_step(batch, batch_idx, detach=True)
+    def validation_step(self, batch):
+        losses, logits, masks, preds = self._shared_step(batch, detach=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
         metrics = self._shared_metric_step(loss, logits, masks, preds)
@@ -200,6 +216,9 @@ class LitUNetModule(pl.LightningModule):
             self.log("dice_TC/val_dice_TC", metrics["dice_TC"], on_epoch=True)
             self.log("dice_ET/val_dice_ET", metrics["dice_ET"], on_epoch=True)
             self.log("dice_WT/val_dice_WT", metrics["dice_WT"], on_epoch=True)
+            #MSE
+            self.log("mse_score/val_mse_score", metrics["mse_score"], on_epoch=True)
+            self.log("fmse_score/val_fmse_score", metrics["fmse_score"], on_epoch=True)
 
             self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -221,9 +240,9 @@ class LitUNetModule(pl.LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         return {"optimizer": optimizer}
         
-    def loss(self, logits, preds, masks, soft_masks):
+    def loss(self, logits, masks, soft_masks):
                     
-        # Regression Loss (SOFT LOSS)
+        ### Regression Losses (SOFT LOSSES) ###
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
             mse_loss = torch.tensor(0.0)
         else:
@@ -233,82 +252,97 @@ class LitUNetModule(pl.LightningModule):
             adw_loss = torch.tensor(0.0)
         else:
             adw_loss = self.ADWL(logits, soft_masks) * self.adw_loss_w * self.soft_loss_w
+        
+        ### END of Regression Losses (SOFT LOSSES) ###
 
-        # Classification Losses (HARD LOSSES)
+        #### Classification Losses (HARD LOSSES) ###
         if self.ce_loss_w == 0 or self.hard_loss_w == 0:
             ce_loss = torch.tensor(0.0)
         else:
             ce_loss = self.CEL(logits, masks.squeeze(1)) * self.ce_loss_w * self.hard_loss_w    # underlying NLLLoss can't handle mixed precision on CPU I guess (does mixed precision exist on cpu?)
 
-        dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0) # have to find a solution to use logits for loss function as preds are not backpropagatable
-        # Brats Dice Losses for subregions equally weighted
-        # if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
-        #     dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
-        # else:
-        #     # can't use class indices for loss function as they are not backpropagatable
+        #Brats Dice Losses for subregions equally weighted
+        if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
+            dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
+        else:
+            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
 
-        #     preds_ET = (preds == 3)
-        #     preds_TC = ((preds == 1) | (preds == 3))
-        #     preds_WT = (preds > 0)
+            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+            
+            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-        #     gt_ET = (masks == 3)
-        #     gt_TC = ((masks == 1) | (masks == 3))
-        #     gt_WT = (masks > 0)
+            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-        #     dice_ET_loss = self.MonaiDiceBratsLoss(preds_ET, gt_ET) * self.dsc_loss_w * self.hard_loss_w
-        #     dice_TC_loss = self.MonaiDiceBratsLoss(preds_TC, gt_TC) * self.dsc_loss_w * self.hard_loss_w
-        #     dice_WT_loss = self.MonaiDiceBratsLoss(preds_WT, gt_WT) * self.dsc_loss_w * self.hard_loss_w
-        #     print(f"dice_ET_loss {dice_ET_loss} and shape {dice_ET_loss.shape}")
-        #     print(f"dice_TC_loss {dice_TC_loss} and shape {dice_TC_loss.shape}")
-        #     print(f"dice_WT_loss {dice_WT_loss} and shape {dice_WT_loss.shape}")
+            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+
+            gt_ET_FG = (masks == 3).long()
+            gt_TC_FG = (((masks == 1) | (masks == 3))).long()
+            gt_WT_FG = (masks > 0).long()
+
+            dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET_FG) * self.dsc_loss_w * self.hard_loss_w
+            dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC_FG) * self.dsc_loss_w * self.hard_loss_w
+            dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
 
         # Brats Soft Dice Losses for subregions equally weighted
         if self.soft_dice_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
-            brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
+            ## APPROACH 1 ##
+
+            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+
+            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            logits_et = self._prepare_region_logits(logits, brats_regions['ET'])
-            logits_tc = self._prepare_region_logits(logits, brats_regions['TC'])
-            logits_wt = self._prepare_region_logits(logits, brats_regions['WT'])
+            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            gt_tc = ((masks == 1) | (masks == 3)).unsqueeze(1)
-            gt_et = (masks == 3).unsqueeze(1)
-            gt_wt = (masks > 0).unsqueeze(1)
+            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-        #     # masks_ET = ((masks == 3)).unsqueeze(1)
-        #     # masks_TC = ((masks == 1) | (masks == 3)).unsqueeze(1)
-        #     # masks_WT = (masks > 0).unsqueeze(1)
+            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
-        #     # logits_ET_FG = logits[:, 3, ...].unsqueeze(1)
-        #     # logits_ET_BG = torch.maximum(torch.maximum(logits[:, 0], logits[:, 1]), logits[:, 2]).unsqueeze(1)
-        #     # logits_ET = torch.cat([logits_ET_BG, logits_ET_FG], dim=1)
+            # # APPROACH 2 ##
+            # logits_ET = logits.clone()
+            # logits_TC = logits.clone()
+            # logits_WT = logits.clone()
 
-        #     # logits_TC_FG = torch.maximum(logits[:, 1], logits[:, 3]).unsqueeze(1)
-        #     # logits_TC_BG = torch.maximum(logits[:, 0], logits[:, 2]).unsqueeze(1)
-        #     # logits_TC = torch.cat([logits_TC_BG, logits_TC_FG], dim=1)
-
-        #     # logits_WT_FG = torch.maximum(torch.maximum(logits[:, 1], logits[:, 2]), logits[:, 3]).unsqueeze(1)
-        #     # logits_WT_BG = logits[:, 0].unsqueeze(1)
-        #     # logits_WT = torch.cat([logits_WT_BG, logits_WT_FG], dim=1)
+            # logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+            # logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-        #     # probs_ET = self.softmax(logits_ET)
-        #     # probs_TC = self.softmax(logits_TC)
-        #     # probs_WT = self.softmax(logits_WT)
+            # logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+            # logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-        #     # del logits_ET, logits_ET_FG, logits_ET_BG, logits_TC, logits_TC_FG, logits_TC_BG, logits_WT, logits_WT_FG, logits_WT_BG
+            # logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+            # logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-            soft_dice_ET_loss = (1 - self.SoftDice(logits_et, gt_et)) * self.soft_dice_loss_w
-            soft_dice_TC_loss = (1 - self.SoftDice(logits_tc, gt_tc)) * self.soft_dice_loss_w
-            soft_dice_WT_loss = (1 - self.SoftDice(logits_wt, gt_wt)) * self.soft_dice_loss_w
+            # logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+            # logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+            # logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
-        #     soft_dice_ET_loss = self.SoftDice(logits_et, gt_et) * self.soft_dice_loss_w
-        #     soft_dice_TC_loss = self.SoftDice(logits_tc, gt_tc) * self.soft_dice_loss_w
-        #     soft_dice_WT_loss = self.SoftDice(logits_wt, gt_wt) * self.soft_dice_loss_w
 
-        #     # del logits_et, logits_tc, logits_wt, gt_et, gt_tc, gt_wt
+            gt_ET_FG = (masks == 3).long().squeeze(1)
+            gt_TC_FG = (((masks == 1) | (masks == 3))).long().squeeze(1)
+            gt_WT_FG = (masks > 0).long().squeeze(1)
 
-        #     # del probs_ET, probs_TC, probs_WT, masks_ET, masks_TC, masks_WT
+            gt_ET = F.one_hot(gt_ET_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+            gt_TC = F.one_hot(gt_TC_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+            gt_WT = F.one_hot(gt_WT_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+
+            soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w * self.hard_loss_w
+            soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w * self.hard_loss_w
+            soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
 
         # # # Weight Regularization
         # # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
@@ -334,7 +368,7 @@ class LitUNetModule(pl.LightningModule):
     def _loss_merge(self, losses: dict):
         return sum(losses.values())
     
-    def _shared_step(self, batch, batch_idx, detach: bool =False):
+    def _shared_step(self, batch, detach: bool =False):
         imgs = batch['img']     # unpacking the batch
         masks = batch['seg']    # unpacking the batch
         soft_masks = batch['soft_seg']  # unpacking the batch
@@ -357,8 +391,6 @@ class LitUNetModule(pl.LightningModule):
                 probs = self.relu(logits)
 
         preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability -> argmax not differentiable
-        #_, preds = torch.max(probs, dim=1, keepdim=True)    # getting the class with the highest probability -> also not differentiable, just use for eval
-
         del probs
 
         if detach:
@@ -367,16 +399,18 @@ class LitUNetModule(pl.LightningModule):
             logits = logits.detach()
             preds = preds.detach()
 
-        losses = self.loss(logits,preds, masks, soft_masks)
+        losses = self.loss(logits, masks, soft_masks)
 
+        # #printing for every param if requires_grad is True
         # for name, param in self.model.named_parameters():
         #     print(name, param.requires_grad)
 
-        for k, v in losses.items():
-            if v is not isinstance(v, bool):
-                if v.requires_grad == False and v != 0:
-                    print(f"{k} = {v} requires grad:")
-                    print(f"{v.requires_grad}")
+        # #printing when requires_grad is False -> no backpropagation
+        # for k, v in losses.items():
+        #     if v is not isinstance(v, bool):
+        #         if v.requires_grad == False and v != 0:
+        #             print(f"{k} = {v} requires grad:")
+        #             print(f"{v.requires_grad}")
 
         return losses, logits, masks, preds
     
@@ -404,6 +438,17 @@ class LitUNetModule(pl.LightningModule):
         # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
         dice_WT = self.DiceFG((preds > 0), (masks > 0))
 
+        mse_score = mF.mean_squared_error(preds, masks.squeeze(1))
+
+        fore_mask = (masks>0).long().squeeze(1)
+
+        fore_area = torch.sum(fore_mask).item()
+
+        if fore_area > 0:  # Avoid division by zero
+            fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_vol / fore_area
+        else:
+            fmse_score = torch.tensor(0.0)  # Handle the case where there is no foreground
+
         return {
             "loss": loss.detach(), 
             "dice": dice.detach(), 
@@ -412,6 +457,8 @@ class LitUNetModule(pl.LightningModule):
             "dice_ET": dice_ET.detach(),
             "dice_TC": dice_TC.detach(),
             "dice_WT": dice_WT.detach(),
+            "mse_score": mse_score.detach(),
+            "fmse_score": fmse_score.detach(),
             #"assd": assd
         }           
 
@@ -428,21 +475,6 @@ class LitUNetModule(pl.LightningModule):
             results[m] = torch.mean(stacked) if m != "dice_p_cls" else torch.mean(stacked, dim=0)
         return results   
     
-    def _filter_empty_classes(self, preds_one_hot, masks_one_hot):
-        """
-        Filter out classes that are completely absent in either the predictions or ground truth.
-        
-        Args:
-            preds_one_hot: One-hot encoded predictions of shape (batch_size, num_classes, height, width).
-            masks_one_hot: One-hot encoded ground truth of shape (batch_size, num_classes, height, width).
-        
-        Returns:
-            Filtered predictions and ground truth with non-empty classes.
-        """
-        non_empty_classes = (masks_one_hot.sum(dim=[0, 2, 3]) != 0) & (preds_one_hot.sum(dim=[0, 2, 3]) != 0)
-        preds_one_hot = preds_one_hot[:, non_empty_classes]
-        masks_one_hot = masks_one_hot[:, non_empty_classes]
-        return preds_one_hot, masks_one_hot
     
     def _prepare_region_logits(self, logits, target_classes):
         """

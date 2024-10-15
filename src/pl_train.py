@@ -324,6 +324,7 @@ if __name__ == '__main__':
         name=model_name,
         version=str(f"{model_name}_v{version}_lr{opt.lr}{suffix}{opt.suffix}"), # naming is a bit wack, improve later
         default_hp_metric=False,
+        log_graph=False,     # to log the Model Graph
     )
 
     # Profiler to monitor performance
@@ -350,7 +351,7 @@ if __name__ == '__main__':
         log_every_n_steps=10, 
         accelerator='gpu',
         devices = -1,
-        detect_anomaly=False,
+        detect_anomaly=True,
         logger=logger,
         callbacks=callbacks, 
         #profiler=profiler,
