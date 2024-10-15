@@ -242,7 +242,7 @@ class LitUNetModule(pl.LightningModule):
         
     def loss(self, logits, masks, soft_masks):
                     
-        # Regression Loss (SOFT LOSS)
+        ### Regression Losses (SOFT LOSSES) ###
         if self.soft_loss_w == 0 or self.mse_loss_w == 0:
             mse_loss = torch.tensor(0.0)
         else:
@@ -252,8 +252,10 @@ class LitUNetModule(pl.LightningModule):
             adw_loss = torch.tensor(0.0)
         else:
             adw_loss = self.ADWL(logits, soft_masks) * self.adw_loss_w * self.soft_loss_w
+        
+        ### END of Regression Losses (SOFT LOSSES) ###
 
-        # Classification Losses (HARD LOSSES)
+        #### Classification Losses (HARD LOSSES) ###
         if self.ce_loss_w == 0 or self.hard_loss_w == 0:
             ce_loss = torch.tensor(0.0)
         else:
@@ -338,9 +340,9 @@ class LitUNetModule(pl.LightningModule):
             gt_TC = F.one_hot(gt_TC_FG, num_classes=2).permute(0, 4, 1, 2, 3)
             gt_WT = F.one_hot(gt_WT_FG, num_classes=2).permute(0, 4, 1, 2, 3)
 
-            soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w
-            soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w
-            soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w
+            soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w * self.hard_loss_w
+            soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w * self.hard_loss_w
+            soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
 
         # # # Weight Regularization
         # # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
