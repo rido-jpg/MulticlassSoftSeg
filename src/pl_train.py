@@ -64,6 +64,7 @@ def parse_train_param(parser=None):
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
     #
     parser.add_argument("-do2D", action="store_true", default=False, help="Use 2D Unet instead of 3D Unet")
+    parser.add_argument("-binary",action="store_true", default = False, help ="Do binary classification on the dataset i.e. Background vs Whole Tumor")
     parser.add_argument("-resize", type=int, nargs= "+", default=(152, 192, 144), help="Resize the input images to this size (divisible by 8)")
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Adaptive Wing Loss) for training")
@@ -221,14 +222,12 @@ if __name__ == '__main__':
         else:
             in_channels = 1
 
-        if n_classes == 2:
-            binary = True
-        else:
-            binary = False
+        if opt.binary == True:
+            n_classes = 2
         
-        data_module = BidsDataModule(opt = opt, data_dir = data_dir,binary = binary, train_transform = augmentations, test_transform=None)
+        data_module = BidsDataModule(opt = opt, data_dir = data_dir, train_transform = augmentations, test_transform=None)
 
-        model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
+        model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, n_classes = n_classes)
 
     elif opt.dataset == 'cityscapes':
         opt.do2D = True
@@ -237,14 +236,14 @@ if __name__ == '__main__':
 
         in_channels = 3 # rgb channels
 
-        n_classes = 1   #  only traffic signs -> 1 output channel is enough 
+        n_classes = 2   #  only traffic signs but even for binary classification two channels are better than just one
         out_channels = n_classes
 
-        binary = True
+        opt.binary = True
 
         data_module = CityscapesDataModule(opt = opt)
 
-        model = LitUNetCityModule(opt = opt, in_channels = in_channels, out_channels = out_channels, binary= binary, n_classes = n_classes)
+        model = LitUNetCityModule(opt = opt, in_channels = in_channels, out_channels = out_channels, n_classes = n_classes)
 
 
     print("Train with arguments")
@@ -289,7 +288,7 @@ if __name__ == '__main__':
     if opt.dilate != 0:
         n_dilate = str(f"_dilate_{opt.dilate}")
 
-    if binary:
+    if opt.binary:
         n_bin = str("_binary")
 
     if opt.grad_accum > 1:
