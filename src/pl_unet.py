@@ -269,23 +269,20 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-
-            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+            logits_ET_FG = logits[:,[3]].clone().sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].clone().sum(dim=1, keepdim=True)
             
-            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+            logits_TC_FG = logits[:,[1, 3]].clone().sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].clone().sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+            logits_WT_FG = logits[:,[1,2,3]].clone().sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].clone().sum(dim=1, keepdim=True)
 
             logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
             logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
             logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
+            # MonaiDiceLoss converts GTs to one hot
             gt_ET_FG = (masks == 3).long()
             gt_TC_FG = (((masks == 1) | (masks == 3))).long()
             gt_WT_FG = (masks > 0).long()
@@ -298,43 +295,18 @@ class LitUNetModule(pl.LightningModule):
         if self.soft_dice_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
-            ## APPROACH 1 ##
-
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-
-            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+            logits_ET_FG = logits[:,[3]].clone().sum(dim=1, keepdim=True)
+            logits_ET_BG = logits[:,[0,1,2]].clone().sum(dim=1, keepdim=True)
             
-            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+            logits_TC_FG = logits[:,[1, 3]].clone().sum(dim=1, keepdim=True)
+            logits_TC_BG = logits[:,[0, 2]].clone().sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+            logits_WT_FG = logits[:,[1,2,3]].clone().sum(dim=1, keepdim=True)
+            logits_WT_BG = logits[:,[0]].clone().sum(dim=1, keepdim=True)
 
             logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
             logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
             logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
-
-            # # APPROACH 2 ##
-            # logits_ET = logits.clone()
-            # logits_TC = logits.clone()
-            # logits_WT = logits.clone()
-
-            # logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            # logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
-            
-            # logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            # logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
-
-            # logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            # logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
-
-            # logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
-            # logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
-            # logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
-
 
             gt_ET_FG = (masks == 3).long().squeeze(1)
             gt_TC_FG = (((masks == 1) | (masks == 3))).long().squeeze(1)
@@ -405,23 +377,9 @@ class LitUNetModule(pl.LightningModule):
 
         losses = self.loss(logits, masks, soft_masks)
 
-        # #printing for every param if requires_grad is True
-        # for name, param in self.model.named_parameters():
-        #     print(name, param.requires_grad)
-
-        # #printing when requires_grad is False -> no backpropagation
-        # for k, v in losses.items():
-        #     if v is not isinstance(v, bool):
-        #         if v.requires_grad == False and v != 0:
-        #             print(f"{k} = {v} requires grad:")
-        #             print(f"{v.requires_grad}")
-
         return losses, logits, masks, preds
     
     def _shared_metric_step(self, loss, logits, masks, preds):
-        # if self.one_hot and not self.soft:
-        #     masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks to integer masks
-
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
