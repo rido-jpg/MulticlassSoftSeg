@@ -10,7 +10,6 @@ from pathlib import Path
 from torch.optim import lr_scheduler
 from torch import nn
 from argparse import Namespace
-from models.unet_copilot import UNet
 from models.unet2D_H import Unet2D
 from models.unet3D_H import Unet3D
 #from medpy.metric.binary import assd
@@ -33,7 +32,7 @@ from utils.brats_tools import soften_gt
 
 
 class LitUNetModule(pl.LightningModule):
-    def __init__(self, opt: Namespace, in_channels: int, out_channels: int, binary: bool=False, n_classes: int=4):
+    def __init__(self, opt: Namespace, in_channels: int, out_channels: int):
         super(LitUNetModule, self).__init__()
 
         self.save_hyperparameters()
@@ -41,12 +40,14 @@ class LitUNetModule(pl.LightningModule):
         self.opt = opt
 
         self.do2D = opt.do2D
-        self.binary = binary
+        self.binary = opt.binary
         self.soft = opt.soft
         self.one_hot = opt.one_hot
         self.sigma = opt.sigma
         self.dilate = opt.dilate
         self.final_activation = opt.activation
+
+        self.out_channels = out_channels
 
         self.start_lr = opt.lr
         self.linear_end_factor = opt.lr_end_factor
@@ -74,12 +75,10 @@ class LitUNetModule(pl.LightningModule):
             self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w])
 
         if self.do2D:
-            #self.model = UNet(in_channels, out_channels)
-            self.model = Unet2D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
+            self.model = Unet2D(dim=self.dim, out_dim = self.out_channels, channels=in_channels, resnet_block_groups= self.groups)
         else:
-            self.model = Unet3D(dim=self.dim, out_dim = out_channels, channels=in_channels, resnet_block_groups= self.groups)
+            self.model = Unet3D(dim=self.dim, out_dim = self.out_channels, channels=in_channels, resnet_block_groups= self.groups)
 
-        self.n_classes = n_classes
         self.transforms = None
 
         self.train_step_outputs = {}
@@ -426,7 +425,7 @@ class LitUNetModule(pl.LightningModule):
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
         diceFG = self.DiceFG(preds, masks)
-        dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.n_classes) # average=None returns dice per class
+        dice_p_cls = mF.dice(preds, masks, average=None, num_classes=self.out_channels) # average=None returns dice per class
 
         # in the case that a class is not available in ground truth and prediction, the dice_p_cls would be NaN -> set it to 1, as it correctly predicts the absence
         for idx, score in enumerate(dice_p_cls):
