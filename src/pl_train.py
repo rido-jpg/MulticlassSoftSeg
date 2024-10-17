@@ -213,21 +213,21 @@ if __name__ == '__main__':
         
         if opt.sample_subset:
             data_dir = data_dir + '/Sample-Subset'
-        
-        n_classes = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
-        out_channels = n_classes    # as we don't have intermediate feature maps, our output are the final class predictions
-        
         if opt.contrast == 'multimodal':
             in_channels = 4
         else:
             in_channels = 1
 
-        if opt.binary == True:
-            n_classes = 2
+        if opt.binary == True:  # as we don't have intermediate feature maps, our output are the final class predictions -> n_classes = out_channels
+            out_channels = 2   # background vs whole tumor
+        else:
+            out_channels = 4   # we have 4 classes (background, edema, non-enhancing tumor, enhancing tumor)
+
+        
         
         data_module = BidsDataModule(opt = opt, data_dir = data_dir, train_transform = augmentations, test_transform=None)
 
-        model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels, n_classes = n_classes)
+        model = LitUNetModule(opt = opt, in_channels = in_channels, out_channels = out_channels)
 
     elif opt.dataset == 'cityscapes':
         opt.do2D = True
@@ -236,14 +236,13 @@ if __name__ == '__main__':
 
         in_channels = 3 # rgb channels
 
-        n_classes = 2   #  only traffic signs but even for binary classification two channels are better than just one
-        out_channels = n_classes
+        out_channels = 2   #  only traffic signs but even for binary classification two channels are better than just one
 
         opt.binary = True
 
         data_module = CityscapesDataModule(opt = opt)
 
-        model = LitUNetCityModule(opt = opt, in_channels = in_channels, out_channels = out_channels, n_classes = n_classes)
+        model = LitUNetCityModule(opt = opt, in_channels = in_channels, out_channels = out_channels)
 
 
     print("Train with arguments")
