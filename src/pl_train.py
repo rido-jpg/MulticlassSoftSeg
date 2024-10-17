@@ -357,7 +357,7 @@ if __name__ == '__main__':
         #profiler=profiler,
         profiler='simple',
         inference_mode=True,    # optimizes performance during evaluation phases, such as validation, testing, and prediction, by disabling gradient calculations -> makes using torch.no_grad obsolete
-        deterministic = True,   # to ensure compatibility between runs
+        deterministic = True,   # to ensure reproducibility of runs
         accumulate_grad_batches=opt.grad_accum,
     )
 
