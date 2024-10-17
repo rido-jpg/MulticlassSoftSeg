@@ -110,6 +110,7 @@ class LitUNetModule(pl.LightningModule):
     #     return batch
     
     def on_fit_start(self):
+        # pl.seed_everything(42,workers=True) # Setting seed for reproducibility -> probably not necessary (should be enough in pl_train)
         tb = self.logger.experiment  # noqa
         layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
         layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
