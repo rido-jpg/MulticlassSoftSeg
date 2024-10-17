@@ -96,8 +96,8 @@ class BidsDataset(Dataset):
         self.do2D = opt.do2D
         self.transform = transform
         self.binary = binary
-        self.soft = opt.soft
-        self.one_hot = opt.one_hot
+        #self.soft = opt.soft
+        #self.one_hot = opt.one_hot
         self.sigma = opt.sigma
         self.resize = tuple(opt.resize)
         self.dict_keys = brats_keys
