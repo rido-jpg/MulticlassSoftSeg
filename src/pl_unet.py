@@ -65,9 +65,13 @@ class LitUNetModule(pl.LightningModule):
 
         h, w, d = self.opt.resize
         self.tensor_shape = [self.opt.bs, 2, h, w, d]
-        self.img_vol = h*w*d
-
-        self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
+        
+        if not self.binary:
+            self.img_area = h*w*d
+            self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
+        else: 
+            self.img_area = h*w
+            self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w])
 
         if self.do2D:
             #self.model = UNet(in_channels, out_channels)
@@ -443,9 +447,10 @@ class LitUNetModule(pl.LightningModule):
         fore_mask = (masks>0).long().squeeze(1)
 
         fore_area = torch.sum(fore_mask).item()
+        #img_area = preds.view(-1).shape[0]
 
         if fore_area > 0:  # Avoid division by zero
-            fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_vol / fore_area
+            fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_area / fore_area
         else:
             fmse_score = torch.tensor(0.0)  # Handle the case where there is no foreground
 
