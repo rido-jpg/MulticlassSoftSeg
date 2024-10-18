@@ -418,14 +418,19 @@ class LitUNetModule(pl.LightningModule):
             if score.isnan():
                 dice_p_cls[idx] = 1.0
 
-        # ET (Enhancing Tumor): label 3
-        dice_ET = self.DiceFG((preds == 3), (masks == 3))
+        if self.binary:
+            dice_ET = dice_TC = torch.tensor(0.0)   # ET and TC Region Metrics don't work for binary case
 
-        # TC(Tumor Core): ET + NCR = label 1 + label 3
-        dice_TC = self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))
+            dice_WT = self.DiceFG((preds > 0), (masks > 0)) # WT (Whole Tumor) for binary case
+        else:
+            # ET (Enhancing Tumor): label 3
+            dice_ET = self.DiceFG((preds == 3), (masks == 3))
 
-        # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
-        dice_WT = self.DiceFG((preds > 0), (masks > 0))
+            # TC(Tumor Core): ET + NCR = label 1 + label 3
+            dice_TC = self.DiceFG((preds == 1) | (preds == 3), (masks == 1) | (masks == 3))
+
+            # WT (Whole Tumor): TC + ED = label 1 + label 2 + label 3
+            dice_WT = self.DiceFG((preds > 0), (masks > 0))
 
         mse_score = mF.mean_squared_error(preds, masks.squeeze(1))
 
