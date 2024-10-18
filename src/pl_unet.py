@@ -63,20 +63,22 @@ class LitUNetModule(pl.LightningModule):
         self.epochs = opt.epochs
         self.dim = opt.dim
         self.groups = opt.groups    # number of resnet block groups
-
-        h, w, d = self.opt.resize
-        self.tensor_shape = [self.opt.bs, 2, h, w, d]
         
-        if not self.binary:
-            self.img_area = h*w*d
-            self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
-        else: 
+        if self.do2D:
+            h, w = self.opt.resize
+            self.tensor_shape = [self.opt.bs, 2, h, w]
+
             self.img_area = h*w
             self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w])
 
-        if self.do2D:
             self.model = Unet2D(dim=self.dim, out_dim = self.out_channels, channels=in_channels, resnet_block_groups= self.groups)
         else:
+            h, w, d = self.opt.resize
+            self.tensor_shape = [self.opt.bs, 2, h, w, d]
+
+            self.img_area = h*w*d
+            self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
+
             self.model = Unet3D(dim=self.dim, out_dim = self.out_channels, channels=in_channels, resnet_block_groups= self.groups)
 
         self.transforms = None
@@ -268,84 +270,68 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+            if self.binary:
+                dice_ET_loss = dice_TC_loss = torch.tensor(0.0)
 
-            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+                dice_WT_loss = self.MonaiDiceBratsLoss(logits, masks) * self.dsc_loss_w * self.hard_loss_w
             
-            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+            else:
+                logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+                logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+                
+                logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+                logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+                logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+                logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
-            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
-            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+                logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+                logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+                logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
-            gt_ET_FG = (masks == 3).long()
-            gt_TC_FG = (((masks == 1) | (masks == 3))).long()
-            gt_WT_FG = (masks > 0).long()
+                gt_ET_FG = (masks == 3).long()
+                gt_TC_FG = (((masks == 1) | (masks == 3))).long()
+                gt_WT_FG = (masks > 0).long()
 
-            dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET_FG) * self.dsc_loss_w * self.hard_loss_w
-            dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC_FG) * self.dsc_loss_w * self.hard_loss_w
-            dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
+                dice_ET_loss = self.MonaiDiceBratsLoss(logits_ET, gt_ET_FG) * self.dsc_loss_w * self.hard_loss_w
+                dice_TC_loss = self.MonaiDiceBratsLoss(logits_TC, gt_TC_FG) * self.dsc_loss_w * self.hard_loss_w
+                dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
 
         # Brats Soft Dice Losses for subregions equally weighted
         if self.soft_dice_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
-            ## APPROACH 1 ##
+            if self.binary:
+                dice_ET_loss = dice_TC_loss = torch.tensor(0.0)
 
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
+                gt_WT = F.one_hot(masks, num_classes=2).permute(0, 4, 1, 2, 3)
 
-            logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
-            
-            logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+                soft_dice_WT_loss = (1 - self.SoftDice(logits, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
+            else:
+                logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
+                logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+                
+                logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
+                logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+                logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
+                logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
 
-            logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
-            logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
-            logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
+                logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
+                logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
+                logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
-            # # APPROACH 2 ##
-            # logits_ET = logits.clone()
-            # logits_TC = logits.clone()
-            # logits_WT = logits.clone()
+                gt_ET_FG = (masks == 3).long().squeeze(1)
+                gt_TC_FG = (((masks == 1) | (masks == 3))).long().squeeze(1)
+                gt_WT_FG = (masks > 0).long().squeeze(1)
 
-            # logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-            # logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
-            
-            # logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-            # logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+                gt_ET = F.one_hot(gt_ET_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+                gt_TC = F.one_hot(gt_TC_FG, num_classes=2).permute(0, 4, 1, 2, 3)
+                gt_WT = F.one_hot(gt_WT_FG, num_classes=2).permute(0, 4, 1, 2, 3)
 
-            # logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-            # logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
-
-            # logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
-            # logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
-            # logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
-
-
-            gt_ET_FG = (masks == 3).long().squeeze(1)
-            gt_TC_FG = (((masks == 1) | (masks == 3))).long().squeeze(1)
-            gt_WT_FG = (masks > 0).long().squeeze(1)
-
-            gt_ET = F.one_hot(gt_ET_FG, num_classes=2).permute(0, 4, 1, 2, 3)
-            gt_TC = F.one_hot(gt_TC_FG, num_classes=2).permute(0, 4, 1, 2, 3)
-            gt_WT = F.one_hot(gt_WT_FG, num_classes=2).permute(0, 4, 1, 2, 3)
-
-            soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w * self.hard_loss_w
-            soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w * self.hard_loss_w
-            soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
+                soft_dice_ET_loss = (1 - self.SoftDice(logits_ET, gt_ET)) * self.soft_dice_loss_w * self.hard_loss_w
+                soft_dice_TC_loss = (1 - self.SoftDice(logits_TC, gt_TC)) * self.soft_dice_loss_w * self.hard_loss_w
+                soft_dice_WT_loss = (1 - self.SoftDice(logits_WT, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
 
         # # # Weight Regularization
         # # l2_reg = torch.tensor(0.0, device=self.device).to(non_blocking=True)
