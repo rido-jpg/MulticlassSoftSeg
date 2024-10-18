@@ -269,10 +269,6 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-
             logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
             logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
@@ -299,11 +295,6 @@ class LitUNetModule(pl.LightningModule):
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
             ## APPROACH 1 ##
-
-            logits_ET = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_TC = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-            logits_WT = torch.zeros(self.tensor_shape, device=self.device, requires_grad=True)
-
             logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
             logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
             
