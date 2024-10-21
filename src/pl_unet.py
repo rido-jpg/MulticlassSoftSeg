@@ -270,14 +270,14 @@ class LitUNetModule(pl.LightningModule):
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
             dice_ET_loss = dice_TC_loss = dice_WT_loss = torch.tensor(0.0)
         else:
-            logits_ET_FG = logits[:,[3]].clone().sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].clone().sum(dim=1, keepdim=True)
+            logits_ET_FG = logits.clone()[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits.clone()[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            logits_TC_FG = logits[:,[1, 3]].clone().sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].clone().sum(dim=1, keepdim=True)
+            logits_TC_FG = logits.clone()[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits.clone()[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].clone().sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].clone().sum(dim=1, keepdim=True)
+            logits_WT_FG = logits.clone()[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits.clone()[:,[0]].sum(dim=1, keepdim=True)
 
             logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
             logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
@@ -296,14 +296,14 @@ class LitUNetModule(pl.LightningModule):
         if self.soft_dice_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
-            logits_ET_FG = logits[:,[3]].clone().sum(dim=1, keepdim=True)
-            logits_ET_BG = logits[:,[0,1,2]].clone().sum(dim=1, keepdim=True)
+            logits_ET_FG = logits.clone()[:,[3]].sum(dim=1, keepdim=True)
+            logits_ET_BG = logits.clone()[:,[0,1,2]].sum(dim=1, keepdim=True)
             
-            logits_TC_FG = logits[:,[1, 3]].clone().sum(dim=1, keepdim=True)
-            logits_TC_BG = logits[:,[0, 2]].clone().sum(dim=1, keepdim=True)
+            logits_TC_FG = logits.clone()[:,[1, 3]].sum(dim=1, keepdim=True)
+            logits_TC_BG = logits.clone()[:,[0, 2]].sum(dim=1, keepdim=True)
 
-            logits_WT_FG = logits[:,[1,2,3]].clone().sum(dim=1, keepdim=True)
-            logits_WT_BG = logits[:,[0]].clone().sum(dim=1, keepdim=True)
+            logits_WT_FG = logits.clone()[:,[1,2,3]].sum(dim=1, keepdim=True)
+            logits_WT_BG = logits.clone()[:,[0]].sum(dim=1, keepdim=True)
 
             logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
             logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
