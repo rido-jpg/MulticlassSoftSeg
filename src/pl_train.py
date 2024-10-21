@@ -166,7 +166,7 @@ def get_trainer_callbacks(bestf1: bool = True):
 
 if __name__ == '__main__':
 
-    pl.seed_everything(42)
+    pl.seed_everything(42, workers=True)
 
     parser = parse_train_param()
     opt = parser.parse_args()
@@ -357,6 +357,7 @@ if __name__ == '__main__':
         #profiler=profiler,
         profiler='simple',
         inference_mode=True,    # optimizes performance during evaluation phases, such as validation, testing, and prediction, by disabling gradient calculations -> makes using torch.no_grad obsolete
+        deterministic = True,   # to ensure reproducibility of runs
         accumulate_grad_batches=opt.grad_accum,
     )
 
