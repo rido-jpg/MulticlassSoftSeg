@@ -111,6 +111,7 @@ class LitUNetModule(pl.LightningModule):
     #     return batch
     
     def on_fit_start(self):
+        # pl.seed_everything(42,workers=True) # Setting seed for reproducibility -> probably not necessary (should be enough in pl_train)
         tb = self.logger.experiment  # noqa
         layout_loss_train = ["loss_train/dice_ET_loss", "loss_train/dice_WT_loss", "loss_train/dice_TC_loss", "loss_train/l2_reg_loss", "loss_train/ce_loss", "loss_train/mse_loss", "loss_train/adw_loss"]
         layout_loss_val = ["loss_val/dice_ET_loss", "loss_val/dice_WT_loss", "loss_val/dice_TC_loss", "loss_val/l2_reg_loss", "loss_val/ce_loss", "loss_val/mse_loss", "loss_val/adw_loss"]
@@ -276,19 +277,20 @@ class LitUNetModule(pl.LightningModule):
                 dice_WT_loss = self.MonaiDiceBratsLoss(logits, masks) * self.dsc_loss_w * self.hard_loss_w
             
             else:
-                logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-                logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+                logits_ET_FG = logits.clone()[:,[3]].sum(dim=1, keepdim=True)
+                logits_ET_BG = logits.clone()[:,[0,1,2]].sum(dim=1, keepdim=True)
                 
-                logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-                logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+                logits_TC_FG = logits.clone()[:,[1, 3]].sum(dim=1, keepdim=True)
+                logits_TC_BG = logits.clone()[:,[0, 2]].sum(dim=1, keepdim=True)
 
-                logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-                logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+                logits_WT_FG = logits.clone()[:,[1,2,3]].sum(dim=1, keepdim=True)
+                logits_WT_BG = logits.clone()[:,[0]].sum(dim=1, keepdim=True)
 
                 logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
                 logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
                 logits_WT = torch.cat((logits_WT_BG, logits_WT_FG),dim=1)
 
+                # MonaiDiceLoss converts GTs to one hot
                 gt_ET_FG = (masks == 3).long()
                 gt_TC_FG = (((masks == 1) | (masks == 3))).long()
                 gt_WT_FG = (masks > 0).long()
@@ -308,14 +310,14 @@ class LitUNetModule(pl.LightningModule):
 
                 soft_dice_WT_loss = (1 - self.SoftDice(logits, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
             else:
-                logits_ET_FG = logits[:,[3]].sum(dim=1, keepdim=True)
-                logits_ET_BG = logits[:,[0,1,2]].sum(dim=1, keepdim=True)
+                logits_ET_FG = logits.clone()[:,[3]].sum(dim=1, keepdim=True)
+                logits_ET_BG = logits.clone()[:,[0,1,2]].sum(dim=1, keepdim=True)
                 
-                logits_TC_FG = logits[:,[1, 3]].sum(dim=1, keepdim=True)
-                logits_TC_BG = logits[:,[0, 2]].sum(dim=1, keepdim=True)
+                logits_TC_FG = logits.clone()[:,[1, 3]].sum(dim=1, keepdim=True)
+                logits_TC_BG = logits.clone()[:,[0, 2]].sum(dim=1, keepdim=True)
 
-                logits_WT_FG = logits[:,[1,2,3]].sum(dim=1, keepdim=True)
-                logits_WT_BG = logits[:,[0]].sum(dim=1, keepdim=True)
+                logits_WT_FG = logits.clone()[:,[1,2,3]].sum(dim=1, keepdim=True)
+                logits_WT_BG = logits.clone()[:,[0]].sum(dim=1, keepdim=True)
 
                 logits_ET = torch.cat((logits_ET_BG, logits_ET_FG),dim=1)
                 logits_TC = torch.cat((logits_TC_BG, logits_TC_FG),dim=1)
@@ -385,23 +387,9 @@ class LitUNetModule(pl.LightningModule):
 
         losses = self.loss(logits, masks, soft_masks)
 
-        # #printing for every param if requires_grad is True
-        # for name, param in self.model.named_parameters():
-        #     print(name, param.requires_grad)
-
-        # #printing when requires_grad is False -> no backpropagation
-        # for k, v in losses.items():
-        #     if v is not isinstance(v, bool):
-        #         if v.requires_grad == False and v != 0:
-        #             print(f"{k} = {v} requires grad:")
-        #             print(f"{v.requires_grad}")
-
         return losses, logits, masks, preds
     
     def _shared_metric_step(self, loss, logits, masks, preds):
-        # if self.one_hot and not self.soft:
-        #     masks = torch.argmax(masks, dim=1).long()  # convert one-hot encoded masks to integer masks
-
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
