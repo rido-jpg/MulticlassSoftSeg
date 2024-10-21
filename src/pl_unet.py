@@ -272,7 +272,7 @@ class LitUNetModule(pl.LightningModule):
         else:
             if self.binary:
                 dice_ET_loss = dice_TC_loss = torch.tensor(0.0)
-
+                
                 dice_WT_loss = self.MonaiDiceBratsLoss(logits, masks) * self.dsc_loss_w * self.hard_loss_w
             
             else:
@@ -364,11 +364,6 @@ class LitUNetModule(pl.LightningModule):
         logits = self.model(imgs)   # this implicitly calls the forward method
     
         del imgs # delete the images tensor to free up memory
-
-        if not self.binary:
-            # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
-            #logits_ET = torch.argmax(logits,)
-            pass
         
         if self.final_activation == "softmax":
             probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
