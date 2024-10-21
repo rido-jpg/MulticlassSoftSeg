@@ -126,7 +126,7 @@ def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: 
 
     # Convert segmentation mask to binary classification labels (tumor vs. non-tumor)
     if binary and seg:
-        img_np[img_np > 0] = 1
+        img_np = (img_np > 0)
 
     # Convert numpy arrays to PyTorch tensors
     img_tensor = torch.from_numpy(img_np.copy())

@@ -50,21 +50,20 @@ brats_regions = {'ET': [3], 'TC': [1, 3], 'WT': [1, 2, 3]}
 # )
 
 class BidsDataModule(pl.LightningDataModule):
-    def __init__(self, opt: Namespace, data_dir: str, format: str='fnio', binary: bool=False, train_transform=None, test_transform=None):
+    def __init__(self, opt: Namespace, data_dir: str, format: str='fnio', train_transform=None, test_transform=None):
         super().__init__()
         self.opt = opt
         self.data_dir = data_dir
         self.format = format
-        self.binary = binary
         self.batch_size = opt.bs 
         self.train_transform = train_transform   
         self.test_transform = test_transform
         self.n_workers = opt.n_cpu
 
     def setup(self, stage: str = None) -> None:
-        self.train_dataset = BidsDataset(self.opt, self.data_dir +'/train', suffix=self.format, binary=self.binary, transform=self.train_transform)
-        self.val_dataset = BidsDataset(self.opt, self.data_dir + '/val', suffix=self.format, binary=self.binary, transform=self.test_transform)
-        self.test_dataset = BidsDataset(self.opt, self.data_dir + '/test', suffix=self.format, binary=self.binary, transform=self.test_transform)
+        self.train_dataset = BidsDataset(self.opt, self.data_dir +'/train', suffix=self.format, transform=self.train_transform)
+        self.val_dataset = BidsDataset(self.opt, self.data_dir + '/val', suffix=self.format, transform=self.test_transform)
+        self.test_dataset = BidsDataset(self.opt, self.data_dir + '/test', suffix=self.format, transform=self.test_transform)
         
     def train_dataloader(self) -> torch.Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True, num_workers=self.n_workers, pin_memory=True)
@@ -76,7 +75,7 @@ class BidsDataModule(pl.LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.n_workers, pin_memory=True)
 
 class BidsDataset(Dataset):
-    def __init__(self, opt: Namespace, data_dir:str, prefix:str="", suffix:str='fnio', binary:bool=False, transform=None):
+    def __init__(self, opt: Namespace, data_dir:str, prefix:str="", suffix:str='fnio', transform=None):
         """
         Parameters:
         data_dir (str): The data directory containing subdirectories for each subject.
@@ -95,7 +94,7 @@ class BidsDataset(Dataset):
         self.suffix = suffix
         self.do2D = opt.do2D
         self.transform = transform
-        self.binary = binary
+        self.binary = opt.binary
         #self.soft = opt.soft
         #self.one_hot = opt.one_hot
         self.sigma = opt.sigma
