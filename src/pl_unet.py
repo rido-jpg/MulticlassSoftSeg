@@ -88,7 +88,7 @@ class LitUNetModule(pl.LightningModule):
 
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
-        self.CEL = nn.CrossEntropyLoss()
+        self.CEL = nn.CrossEntropyLoss(reduction='none')
         self.MSE = nn.MSELoss()
         self.SoftDice = MemoryEfficientSoftDiceLoss(apply_nonlin= self.softmax,batch_dice=False, do_bg=True, smooth=1e-5, ddp=False)
         #self.ADWL = AdapWingLoss(epsilon=1, alpha=2.1, theta=0.5, omega=8)     # complex region selective implementation
@@ -265,7 +265,7 @@ class LitUNetModule(pl.LightningModule):
         if self.ce_loss_w == 0 or self.hard_loss_w == 0:
             ce_loss = torch.tensor(0.0)
         else:
-            ce_loss = self.CEL(logits, masks.squeeze(1)) * self.ce_loss_w * self.hard_loss_w    # underlying NLLLoss can't handle mixed precision on CPU I guess (does mixed precision exist on cpu?)
+            ce_loss = self.CEL(logits, masks.squeeze(1)).mean() * self.ce_loss_w * self.hard_loss_w    # underlying NLLLoss can't handle mixed precision on CPU I guess (does mixed precision exist on cpu?)
 
         #Brats Dice Losses for subregions equally weighted
         if self.dsc_loss_w == 0 or self.hard_loss_w == 0:
@@ -304,9 +304,9 @@ class LitUNetModule(pl.LightningModule):
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
             if self.binary:
-                dice_ET_loss = dice_TC_loss = torch.tensor(0.0)
+                soft_dice_ET_loss = soft_dice_TC_loss = torch.tensor(0.0)
 
-                gt_WT = F.one_hot(masks, num_classes=2).permute(0, 4, 1, 2, 3)
+                gt_WT = F.one_hot(masks.squeeze(1), num_classes=2).permute(0, 4, 1, 2, 3)
 
                 soft_dice_WT_loss = (1 - self.SoftDice(logits, gt_WT)) * self.soft_dice_loss_w * self.hard_loss_w
             else:
