@@ -124,6 +124,7 @@ class LitUNetModule(pl.LightningModule):
         layout_dice_p_cls_merge = ["dice_p_cls/train_dice_p_cls", "dice_p_cls/val_dice_p_cls"]
         layout_mse_merge = ["mse_score/train_mse_score", "mse_score/val_mse_score"]
         layout_fmse_merge = ["fmse_score/train_fmse_score", "fmse_score/val_fmse_score"]
+        layout_soft_mse_merge = ["soft_mse_score/train_soft_mse_score", "mse_score/val_soft_mse_score"]
         #layout_assd_merge = ["assd/train_assd", "assd/val_assd"]
 
         layout = {
@@ -148,9 +149,10 @@ class LitUNetModule(pl.LightningModule):
                 "dice_TC": ["Multiline", layout_dice_TC_merge],
                 "dice_WT": ["Multiline", layout_dice_WT_merge],
             },
-            "MSE Scores": {
+            "MSE Scores (soft evaluated on soft GTs)": {
                 "mse_score": ["Multiline", layout_mse_merge],
                 "fmse_score": ["Multiline", layout_fmse_merge],
+                "soft_mse_score": ["Multiline", layout_soft_mse_merge],
             },
             # "assd_merge": {
             #     "assd": ["Multiline", layout_assd_merge],
@@ -163,9 +165,9 @@ class LitUNetModule(pl.LightningModule):
     
     def training_step(self, batch):
         torch.set_grad_enabled(True)
-        losses, logits, masks, preds = self._shared_step(batch)
+        losses, logits, masks, preds, soft_masks = self._shared_step(batch)
         loss = self._loss_merge(losses)
-        metrics = self._shared_metric_step(loss, logits, masks, preds)
+        metrics = self._shared_metric_step(loss, logits, masks, preds, soft_masks)
         self.log('loss/train_loss', loss.detach(), batch_size=masks.shape[0], prog_bar=True)
 
         for k, v in losses.items():
@@ -187,6 +189,7 @@ class LitUNetModule(pl.LightningModule):
             #MSE
             self.log("mse_score/train_mse_score", metrics["mse_score"], on_epoch=True)
             self.log("fmse_score/train_fmse_score", metrics["fmse_score"], on_epoch=True)
+            self.log("soft_mse_score/train_soft_mse_score", metrics["soft_mse_score"], on_epoch=True)
 
             self.logger.experiment.add_text("train_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -196,10 +199,10 @@ class LitUNetModule(pl.LightningModule):
         self.train_step_outputs.clear()
     
     def validation_step(self, batch):
-        losses, logits, masks, preds = self._shared_step(batch, detach=True)
+        losses, logits, masks, preds, soft_masks = self._shared_step(batch, detach=True)
         loss = self._loss_merge(losses)
         loss = loss.detach()
-        metrics = self._shared_metric_step(loss, logits, masks, preds)
+        metrics = self._shared_metric_step(loss, logits, masks, preds, soft_masks)
         for l, v in losses.items():
             metrics[l] = v.detach()
         self._shared_metric_append(metrics, self.val_step_outputs)
@@ -225,6 +228,7 @@ class LitUNetModule(pl.LightningModule):
             #MSE
             self.log("mse_score/val_mse_score", metrics["mse_score"], on_epoch=True)
             self.log("fmse_score/val_fmse_score", metrics["fmse_score"], on_epoch=True)
+            self.log("soft_mse_score/val_soft_mse_score", metrics["soft_mse_score"], on_epoch=True)
 
             self.logger.experiment.add_text("val_dice_p_cls", str(metrics["dice_p_cls"].tolist()), self.current_epoch)
 
@@ -387,9 +391,9 @@ class LitUNetModule(pl.LightningModule):
 
         losses = self.loss(logits, masks, soft_masks)
 
-        return losses, logits, masks, preds
+        return losses, logits, masks, preds, soft_masks
     
-    def _shared_metric_step(self, loss, logits, masks, preds):
+    def _shared_metric_step(self, loss, logits, masks, preds, soft_masks):
         # No squeezing of masks necessary as mF.dice implicitly squeezes dimension of size 1 (except batch size)
         # Overall Dice Scores
         dice = self.Dice(preds, masks)
@@ -426,6 +430,8 @@ class LitUNetModule(pl.LightningModule):
             fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_area / fore_area
         else:
             fmse_score = torch.tensor(0.0)  # Handle the case where there is no foreground
+            
+        soft_mse_score = mF.mean_squared_error(self.softmax(logits), soft_masks)
 
         return {
             "loss": loss.detach(), 
@@ -437,6 +443,7 @@ class LitUNetModule(pl.LightningModule):
             "dice_WT": dice_WT.detach(),
             "mse_score": mse_score.detach(),
             "fmse_score": fmse_score.detach(),
+            "soft_mse_score": soft_mse_score.detach(),
             #"assd": assd
         }           
 
