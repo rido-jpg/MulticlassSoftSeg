@@ -14,6 +14,7 @@ from argparse import Namespace
 from TPTBox import NII
 from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
+from skimage.measure import block_reduce
 
 from monai.transforms import (
     SpatialPadd,
@@ -97,8 +98,12 @@ class BidsDataset(Dataset):
         self.binary = opt.binary
         #self.soft = opt.soft
         #self.one_hot = opt.one_hot
+
+        self.ds_factor = opt.ds_factor
         self.sigma = opt.sigma
+
         self.resize = tuple(opt.resize)
+
         self.dict_keys = brats_keys
         self.img_key = self.dict_keys[0]
         self.seg_key = self.dict_keys[1]
@@ -131,7 +136,7 @@ class BidsDataset(Dataset):
         mask_path = self.bids_list[idx][self.seg_key]   # Get the path to the segmentation mask
         mask = brats_load(str(mask_path), self.suffix, True)    # Load the segmentation mask
 
-        hard_mask = preprocess(mask, seg=True, binary=self.binary)
+        hard_mask = preprocess(mask, seg=True, binary=self.binary, opt=self.opt)
         soft_mask = preprocess(mask, seg=True, binary=self.binary, n_classes=self.n_classes, opt=self.opt, soft=True)
 
         #Loading multimodal stacked images
@@ -161,6 +166,19 @@ class BidsDataset(Dataset):
             data_dict = self.transform(data_dict)
 
         data_dict = self.postprocess(data_dict) # padding and casting to tensor
+
+        if self.ds_factor is not None:
+            oh_gt = F.one_hot(data_dict[self.seg_key].squeeze(0), num_classes=self.n_classes).permute(3,0,1,2)
+            down_img = block_reduce(np.array(data_dict[self.img_key]), block_size= (1, self.ds_factor, self.ds_factor, self.ds_factor), func = np.mean)
+            down_gt = block_reduce(np.array(oh_gt), block_size=(1, self.ds_factor, self.ds_factor, self.ds_factor) ,func = np.mean)
+
+            img_tensor = torch.tensor(down_img).float()
+            soft_gt_tensor = torch.tensor(down_gt).float()
+            gt_tensor = torch.argmax(torch.round(soft_gt_tensor).long(), dim=0).unsqueeze(0)
+
+            data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
+            pass
+
 
         if self.do2D:
             # Adjust as get_central_slice() expects numpy array and preprocess() returns torch tensor
