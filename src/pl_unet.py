@@ -45,6 +45,8 @@ class LitUNetModule(pl.LightningModule):
         self.one_hot = opt.one_hot
         self.sigma = opt.sigma
         self.dilate = opt.dilate
+        self.ds_factor = opt.ds_factor
+
         self.final_activation = opt.activation
 
         self.out_channels = out_channels
@@ -66,7 +68,9 @@ class LitUNetModule(pl.LightningModule):
         
         if self.do2D:
             h, w = self.opt.resize
-            self.tensor_shape = [self.opt.bs, 2, h, w]
+
+            if self.ds_factor is not None:
+                h, w = [x//self.ds_factor for x in (h, w)]
 
             self.img_area = h*w
             self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w])
@@ -74,7 +78,9 @@ class LitUNetModule(pl.LightningModule):
             self.model = Unet2D(dim=self.dim, out_dim = self.out_channels, channels=in_channels, resnet_block_groups= self.groups)
         else:
             h, w, d = self.opt.resize
-            self.tensor_shape = [self.opt.bs, 2, h, w, d]
+
+            if self.ds_factor is not None:
+                h, w, d = [x//self.ds_factor for x in (h, w, d)]
 
             self.img_area = h*w*d
             self.example_input_array = torch.rand([self.opt.bs, in_channels, h, w, d])
@@ -424,7 +430,7 @@ class LitUNetModule(pl.LightningModule):
         fore_mask = (masks>0).long().squeeze(1)
 
         fore_area = torch.sum(fore_mask).item()
-        #img_area = preds.view(-1).shape[0]
+        #img_area = preds.view(-1).shape[0]/self.opt.bs
 
         if fore_area > 0:  # Avoid division by zero
             fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_area / fore_area
