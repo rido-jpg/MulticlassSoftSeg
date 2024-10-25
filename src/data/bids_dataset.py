@@ -177,7 +177,7 @@ class BidsDataset(Dataset):
 
             img_tensor = torch.tensor(down_img).float()
             soft_gt_tensor = torch.tensor(down_gt).float()
-            gt_tensor = torch.argmax(torch.round(soft_gt_tensor).long(), dim=0).unsqueeze(0)
+            gt_tensor = torch.argmax(soft_gt_tensor, dim=0).unsqueeze(0)    # rebinarizing the soft GT to a hard GT
 
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
             pass
