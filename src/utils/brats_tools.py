@@ -204,11 +204,8 @@ def normalize(nifti_array:np.ndarray) -> np.ndarray:
     std = masked_array.std()
     
     # Only apply normalization to non-zero elements
-    if std > 0:
-        normalized_array = nifti_array.copy()  # Create a copy to retain the original zero values
-        normalized_array[mask] = (masked_array - mean) / std
-    else:
-        raise ValueError("Standard deviation of the masked elements is zero, normalization cannot be performed.")
+    normalized_array = nifti_array.copy()  # Create a copy to retain the original zero values
+    normalized_array[mask] = (masked_array - mean) / max(std, 1e-8)
     
     return normalized_array
 
