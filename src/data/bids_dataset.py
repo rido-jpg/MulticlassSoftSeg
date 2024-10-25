@@ -137,7 +137,10 @@ class BidsDataset(Dataset):
         mask = brats_load(str(mask_path), self.suffix, True)    # Load the segmentation mask
 
         hard_mask = preprocess(mask, seg=True, binary=self.binary, opt=self.opt)
-        soft_mask = preprocess(mask, seg=True, binary=self.binary, n_classes=self.n_classes, opt=self.opt, soft=True)
+        if self.ds_factor is None:
+            soft_mask = preprocess(mask, seg=True, binary=self.binary, n_classes=self.n_classes, opt=self.opt, soft=True)
+        else: 
+            soft_mask = torch.zeros_like(hard_mask)
 
         #Loading multimodal stacked images
         if self.contrast == 'multimodal':
