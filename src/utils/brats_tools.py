@@ -252,3 +252,7 @@ def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
     nifti_image = NII.load(file_path, seg)
     nifti_np_array = nifti_image.get_array()
     return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
+
+def temperature_scaled_softmax(logits, temperature=1.0):
+    logits = logits / temperature
+    return torch.softmax(logits, dim=0)

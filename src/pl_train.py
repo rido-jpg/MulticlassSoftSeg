@@ -48,6 +48,8 @@ def parse_train_param(parser=None):
 
     parser.add_argument("-dataset", type=str, default= 'brats', choices = ['brats', 'cityscapes'], help = 'Which dataset to train the model on')
 
+    parser.add_argument("-experiment", type=int, default = None, choices = [1, 2, 3], help = "Experiment Setups: 1: MultiClass Segmentation; 2: Binary Segmentation on Downsampled (Soft Mask created through downsampling); 3: Binary Segmentation on Downsampled (Soft Mask created through gaussian kernel on top of rebinarized hard GT)") 
+
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
     parser.add_argument("-epochs", type=int, default=400, help="Number of epochs")
     parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
@@ -171,6 +173,21 @@ if __name__ == '__main__':
 
     parser = parse_train_param()
     opt = parser.parse_args()
+
+    if opt.experiment == 3:
+        opt.ds_factor = 2
+        opt.resize = (160,192,144)
+        opt.bs = 8
+        opt.binary = True
+
+    elif opt.experiment == 2:
+        opt.ds_factor = 2
+        opt.resize = (160,192,144)
+        opt.bs = 8
+        opt.binary = True
+
+    elif opt.experiment == 1:
+        opt.bs = 2
 
     if opt.soft:
         opt.one_hot = True

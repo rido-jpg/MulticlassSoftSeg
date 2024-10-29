@@ -28,7 +28,7 @@ sys.path.append(str(file.parents[1]))
 sys.path.append(str(file.parents[2]))
 
 import utils.fastnumpyio.fastnumpyio as fnio
-from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt, brats_load, load_nifti_as_array
+from utils.brats_tools import preprocess, slice_and_pad, normalize, get_central_slice, soften_gt, dilate_gt, brats_load, load_nifti_as_array
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -179,8 +179,14 @@ class BidsDataset(Dataset):
             soft_gt_tensor = torch.tensor(down_gt).float()
             gt_tensor = torch.argmax(soft_gt_tensor, dim=0).unsqueeze(0)    # rebinarizing the soft GT to a hard GT
 
+            if self.opt.experiment == 3:
+                oh_gt = F.one_hot(gt_tensor.squeeze(0), num_classes=self.n_classes).permute(3,0,1,2)
+                if self.opt.dilate != 0:
+                    oh_gt = dilate_gt(oh_gt, self.dilate)
+
+                soft_gt_tensor = soften_gt(oh_gt, self.sigma)
+
             data_dict = {self.img_key: img_tensor, self.seg_key: gt_tensor, self.soft_seg_key: soft_gt_tensor}
-            pass
 
 
         if self.do2D:
@@ -188,7 +194,7 @@ class BidsDataset(Dataset):
             data_dict[self.img_key] = get_central_slice(data_dict[self.img_key])
             data_dict[self.seg_key] = get_central_slice(data_dict[self.seg_key])
             data_dict[self.soft_seg_key] = get_central_slice(data_dict[self.soft_seg_key])
-        
+            
         return data_dict
 
 def create_bids_path_list_of_dicts(data_dir:str, prefix:str="", suffix:str="nii.gz")->list:
