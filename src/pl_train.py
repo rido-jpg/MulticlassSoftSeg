@@ -61,6 +61,8 @@ def parse_train_param(parser=None):
     parser.add_argument("-val_every_n_epoch", type=int, default=1, help="Validation every n epochs")
 
     parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu", "sigmoid"], help="Final activation function")
+
+    parser.add_argument("-softmax_temperature", type=float, default = None, help = "Use Softmax with chosen temperature on soft masks to change the distribution of probabilities. Lower temperature means wider range. Value of 1 equals normal Softmax")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
@@ -71,7 +73,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Adaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
-    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks")
+    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks. Recommended to use softmax with temperature if dilation is used")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
