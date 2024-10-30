@@ -288,10 +288,8 @@ class LitUNetCityModule(pl.LightningModule):
                 # create binary logits for the specific subregions ET, TC and WT by argmaxing the respective channels of the regions
                 #logits_ET = torch.argmax(logits,)
                 pass
-            if self.final_activation == 'sigmoid':
-                probs = self.sigmoid(logits)
-
-            elif self.final_activation == "softmax":
+            
+            if self.final_activation == "softmax":
                 probs = self.softmax(logits)    # applying softmax to the logits to get probabilites
 
             elif self.final_activation == "relu":
