@@ -79,13 +79,13 @@ def parse_train_param(parser=None):
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
 
     parser.add_argument("-l2_reg_w", type=float, default=1e-3, help="L2 Regularization Weight Factor")
-    parser.add_argument("-dsc_loss_w", type=float, default=1.0, help="Dice Loss Weight Factor")
+    parser.add_argument("-dsc_loss_w", type=float, default=0.0, help="Dice Loss Weight Factor")
     parser.add_argument("-ce_loss_w", type=float, default=1.0, help="Cross Entropy Loss Weight Factor")
     parser.add_argument("-hard_loss_w", type=float, default=1.0, help="Factor that all Classification Losses (CE, Dice) are multiplied with")
     parser.add_argument("-soft_loss_w", type=float, default=1.0, help="Factor that all Regression Losses (MSE, ADW) are multiplied with")
     parser.add_argument("-mse_loss_w", type=float, default=0.0, help="Mean Squared Error Loss Weight Factor")
     parser.add_argument("-adw_loss_w", type=float, default=0.0, help="Adaptive Wing Loss Weight Factor")
-    parser.add_argument("-soft_dice_loss_w", type=float, default=0.0, help="Soft Dice Loss Weight Factor")
+    parser.add_argument("-soft_dice_loss_w", type=float, default=1.0, help="Soft Dice Loss Weight Factor")
 
     parser.add_argument("-threshold", type=float, default=0.5, choices = np.arange(0, 1,0.1),  help="Threshold for conversion of binary probabilities to predictions")
     parser.add_argument("-sigma", type=float, default=0.125, help="Sigma for Gaussian Noise. Min value is 0.125 because otherwise the kernel radius is 0 (Radius = round(4*sigma))")
