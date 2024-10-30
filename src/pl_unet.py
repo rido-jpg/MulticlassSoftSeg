@@ -436,8 +436,16 @@ class LitUNetModule(pl.LightningModule):
             fmse_score = mF.mean_squared_error(preds * fore_mask, masks.squeeze(1) * fore_mask) * self.img_area / fore_area
         else:
             fmse_score = torch.tensor(0.0)  # Handle the case where there is no foreground
+
+        if self.final_activation == "softmax":
+            soft_mse_score = mF.mean_squared_error(self.softmax(logits), soft_masks)
+
+        elif self.final_activation == "relu":
+            if bool(self.relu(logits).max()): # checking if the max value of the relu is not zero
+                soft_mse_score = mF.mean_squared_error(self.relu(logits)/self.relu(logits).max(), soft_masks)
+            else: 
+                soft_mse_score = mF.mean_squared_error(self.relu(logits), soft_masks)
             
-        soft_mse_score = mF.mean_squared_error(self.softmax(logits), soft_masks)
 
         return {
             "loss": loss.detach(), 
