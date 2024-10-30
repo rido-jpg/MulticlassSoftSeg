@@ -60,7 +60,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-matmul_precision", type=str, default='high', choices=['highest', 'high', 'medium'], help="Precision for Matrix multiplications")
     parser.add_argument("-val_every_n_epoch", type=int, default=1, help="Validation every n epochs")
 
-    parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu", "sigmoid"], help="Final activation function")
+    parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
 
     parser.add_argument("-softmax_temperature", type=float, default = None, help = "Use Softmax with chosen temperature on soft masks to change the distribution of probabilities. Lower temperature means wider range. Value of 1 equals normal Softmax")
     #
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     elif opt.dataset == 'cityscapes':
         opt.do2D = True
 
-        opt.activation = 'sigmoid'
+        opt.activation = 'softmax'
 
         in_channels = 3 # rgb channels
 
