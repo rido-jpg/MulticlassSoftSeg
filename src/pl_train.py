@@ -326,7 +326,11 @@ if __name__ == '__main__':
     suffix = str(f"{n_loss_w}{n_grad_accum}{n_down}{n_sigma}{n_dilate}{n_bin}{n_oh}{n_soft}{n_activ}")
 
     #Directory for logs
-    filepath_logs = f"/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/{opt.dataset}"
+    if get_option(opt, "experiment",1) == 1:
+        filepath_logs = f"/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/{opt.dataset}/exp_1"
+
+    elif get_option(opt, "experiment",1) == 2 or get_option(opt, "experiment",1) == 3:  # group logs of exp 2 and 3 together
+        filepath_logs = f"/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/{opt.dataset}/exp_2"
 
     # Determine next version number
     #model_name = model.__class__.__name__
