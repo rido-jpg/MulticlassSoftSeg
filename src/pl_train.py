@@ -203,6 +203,7 @@ if __name__ == '__main__':
     if opt.hard_loss_w == 0.0:
         opt.ce_loss_w = 0.0
         opt.dsc_loss_w = 0.0
+        opt.soft_dice_loss_w = 0.0
     
     if opt.soft_loss_w == 0.0:
         opt.adw_loss_w = 0.0
