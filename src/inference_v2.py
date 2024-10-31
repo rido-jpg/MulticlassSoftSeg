@@ -78,7 +78,7 @@ if __name__ == '__main__':
     torch.set_grad_enabled(False)
 
     t = time.process_time()
-    print(f"Start Time: {t}")
+    print(f"Start Time: {t} seconds")
 
     parser = parse_inf_param()
     conf = parser.parse_args()
@@ -318,4 +318,4 @@ if __name__ == '__main__':
             break
 
     elapsed_time = time.process_time() - t
-    print(f"Process took this much time: {elapsed_time}")
+    print(f"Process took this much time: {elapsed_time} seconds")
