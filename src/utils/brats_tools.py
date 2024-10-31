@@ -153,7 +153,7 @@ def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: 
 
         img_tensor = soften_gt(img_tensor, opt.sigma)   # Apply Gaussian smoothing to the segmentation mask
 
-        if opt.softmax_temperature is not None:
+        if get_option(opt, "softmax_temperature", None) is not None:
             img_tensor = temperature_scaled_softmax(img_tensor, temperature=opt.softmax_temperature)
 
     else:
@@ -260,3 +260,17 @@ def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
 def temperature_scaled_softmax(tensor, temperature=1.0):
     tensor = tensor / temperature
     return torch.softmax(tensor, dim=0)
+
+def get_option(opt: Namespace, attr: str, default, dtype: type = None):
+    # option exists
+    if opt is not None and hasattr(opt, attr):
+        option = getattr(opt, attr)
+        # dtype is given, cast to it
+        if dtype is not None:
+            if dtype == bool and isinstance(option, str):
+                option = option in ["true", "True", "1"]
+            return dtype(option)
+        return option
+
+    # option does not exist, return default
+    return default
