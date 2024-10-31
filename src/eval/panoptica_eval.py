@@ -133,8 +133,8 @@ if __name__ == "__main__":
             if result is not None:
                 print("Done")
 
-    # panoptic_statistic = evaluator.make_statistic()
-    # panoptic_statistic.print_summary()
+    panoptic_statistic = evaluator.make_statistic()
+    panoptic_statistic.print_summary()
 
     # fig = panoptic_statistic.get_summary_figure("sq_dsc", horizontal=True)
     # out_figure = str(f"{dir}/example_sq_dsc_figure.png")
