@@ -170,6 +170,7 @@ class LitUNetModule(pl.LightningModule):
         return self.model(x)
     
     def predict_step(self, batch):
+        torch.set_grad_enabled(False)
         imgs = batch['img']     # unpacking the batch
         logits = self.model(imgs)   # this implicitly calls the forward method
         return logits
