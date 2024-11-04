@@ -19,6 +19,7 @@ from joblib import delayed, Parallel
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 from multiprocessing import set_start_method
+import pandas as pd
 
 from TPTBox import NII
 
@@ -28,7 +29,7 @@ def parse_inf_param(parser=None):
     
     parser.add_argument("-preds_dir", type=str, default = None, help="Path to the model predictions")
     parser.add_argument("-gt_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the Ground Truths (BIDS format)")
-    parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval", help="Path to the directory where the evaluation .tsv should be saved")
+    parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics", help="Path to the directory where the evaluation .tsv should be saved")
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to evaluate. If 0, evaluate all predictions")
     parser.add_argument("-config", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/panoptica_evaluator_BRATS.yaml", help="Name of the configuration file to use for the evaluation")
@@ -135,6 +136,27 @@ if __name__ == "__main__":
 
     panoptic_statistic = evaluator.make_statistic()
     panoptic_statistic.print_summary()
+
+    # Saving the Summary
+    data = panoptic_statistic.get_summary_dict()
+
+    # Transform the data into a format suitable for CSV
+    rows = []
+    for category, metrics in data.items():
+        for metric, (avg, std) in metrics.items():
+            rows.append({
+                'Category': category,
+                'Metric': metric,
+                'Average': avg,
+                'StdDev': std
+            })
+
+    # Create a DataFrame and save to CSV
+    df = pd.DataFrame(rows)
+    df.to_csv(save_dir.joinpath(Path(f"{model_name}_summary.csv")), index=False)    
+
+    # Display the DataFrame
+    print(df)
 
     # fig = panoptic_statistic.get_summary_figure("sq_dsc", horizontal=True)
     # out_figure = str(f"{dir}/example_sq_dsc_figure.png")
