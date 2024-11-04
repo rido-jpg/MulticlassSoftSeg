@@ -23,6 +23,29 @@ import time
 # sys.path.append(str(file.parents[1]))
 # sys.path.append(str(file.parents[2]))
 
+def get_best_checkpoint(directory: str):
+    # Define the directory path
+    directory_path = Path(directory) / "checkpoints"
+    
+    # Regular expression pattern to capture val_diceFG value
+    pattern = re.compile(r"val_diceFG=([0-9.]+)")
+
+    best_ckpt = None
+    best_val_diceFG = -1
+
+    # Iterate over all .ckpt files in the checkpoints folder
+    for ckpt_file in directory_path.glob("*.ckpt"):
+        match = pattern.search(ckpt_file.name)
+        if match:
+            # Convert the captured value to a float
+            val_diceFG = float(match.group(1))
+            # Check if this is the highest val_diceFG so far
+            if val_diceFG > best_val_diceFG:
+                best_val_diceFG = val_diceFG
+                best_ckpt = ckpt_file
+
+    return best_ckpt
+
 def get_option(opt: Namespace, attr: str, default, dtype: type = None):
     # option exists
     if opt is not None and hasattr(opt, attr):
@@ -41,7 +64,7 @@ def parse_inf_param(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     
-    parser.add_argument("-ckpt_dir", type=str, default = None, help="Path to the checkpoint file")
+    parser.add_argument("-model_dir", type=str, default = None, help="Path to the model log folder. Script will automatically obtain the path of the best cpkt (best DiceFG)")
     parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
     parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds", help="Path to the directory where the predictions should be saved")
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
@@ -83,9 +106,12 @@ if __name__ == '__main__':
     parser = parse_inf_param()
     conf = parser.parse_args()
 
-    ckpt_path : Path = Path(conf.ckpt_dir)
+    model_path : Path = Path(conf.model_dir)
     data_dir : Path = Path(conf.data_dir)
     save_dir : Path = Path(conf.save_dir)
+    ckpt_path = get_best_checkpoint(model_path)
+
+    print(f"Best checkpoint: {ckpt_path.name}")
 
     suffix = conf.suffix
 
