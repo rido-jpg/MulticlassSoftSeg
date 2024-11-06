@@ -154,7 +154,7 @@ def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: 
         img_tensor = soften_gt(img_tensor, opt.sigma)   # Apply Gaussian smoothing to the segmentation mask
 
         if get_option(opt, "softmax_temperature", None) is not None:
-            img_tensor = temperature_scaled_softmax(img_tensor, temperature=opt.softmax_temperature)
+            img_tensor = temperature_scaled_softmax(img_tensor, dim = 0, temperature=opt.softmax_temperature)
 
     else:
         img_tensor = img_tensor.unsqueeze(0)    # Add channel dimension to achieve desired shape [C, H, W, D]
@@ -257,9 +257,12 @@ def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
     nifti_np_array = nifti_image.get_array()
     return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
 
-def temperature_scaled_softmax(tensor, temperature=1.0):
+def temperature_scaled_softmax(tensor, dim:int = 0, temperature=1.0):
     tensor = tensor / temperature
-    return torch.softmax(tensor, dim=0)
+    return torch.softmax(tensor, dim=dim)
+
+def l1_norm(probs, dim:int = 0):
+    return probs / probs.sum(dim=dim, keepdim=True)
 
 def get_option(opt: Namespace, attr: str, default, dtype: type = None):
     # option exists
