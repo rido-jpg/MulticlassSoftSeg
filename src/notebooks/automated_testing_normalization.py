@@ -20,12 +20,12 @@ data_dir = '/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data
 
 # Define the parameters for all combinations
 dilate_values = [1]
-sigma_values = [0.125, 0.25, 0.3, 0.4, 0.5]
-dec_values = [3, 4, 5]
+sigma_values = [0.4, 0.5]
+dec_values = [4, 5]
 temp_values = [0.05, 0.1, 0.15]  # Only relevant for temperature_scaled_softmax
 
 # Directory for saving results
-output_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/notebooks/sanity_check_results")
+output_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/notebooks/sanity_check_results_in_depth")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # Initialize list to collect summary statistics for CSV
@@ -44,19 +44,27 @@ gt_skeleton = NII.load(gt_path.with_suffix('.nii.gz'), seg=True)
 def process_samples(bids_ds, gt_skeleton, processing_func, method_name, dilate, sigma, dec, temp=None):
     """Processes samples and saves results for a specific configuration and method."""
     fn, tp, fp, wrong = 0, 0, 0, 0
-    num_samples = 25  # Adjust as necessary
+    start_idx = 200
+    num_samples = 50  # Adjust as necessary
     start_time = time.time()
 
     # Collect sample-level stats for CSV
     sample_stats = []
 
     for idx in range(num_samples):
-        sample = bids_ds[idx]
+        sample = bids_ds[start_idx + idx]
         sample_gt = sample['seg']
         sample_soft_gt = sample['soft_seg']
         
         # Apply the chosen processing method
         processed_soft_gt = processing_func(sample_soft_gt)
+
+        # For the first sample in each configuration, calculate unique values and sums
+        if idx == 0:
+            channel_sums = processed_soft_gt.sum(dim=0)
+            unique_sums, sum_counts = torch.unique(channel_sums, return_counts=True)
+        else:
+            unique_sums, sum_counts = [], [], [], []
 
         # Binarize the processed soft GT
         rebinarized_gt = torch.argmax(processed_soft_gt, dim=0).numpy()
@@ -88,13 +96,15 @@ def process_samples(bids_ds, gt_skeleton, processing_func, method_name, dilate, 
         fp += sample_fp
         wrong += sample_wrong
 
-        # Append sample-level stats
+        # Append sample-level stats, including unique values and channel sums only for the first sample
         sample_stats.append({
             "sample_index": idx,
             "FN": sample_fn,
             "TP": sample_tp,
             "FP": sample_fp,
-            "Wrong": sample_wrong
+            "Wrong": sample_wrong,
+            "unique_sums": unique_sums.tolist() if idx == 0 else None,
+            "sum_counts": sum_counts.tolist() if idx == 0 else None
         })
 
     # Save sample-level stats to CSV
