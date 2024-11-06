@@ -169,6 +169,12 @@ class LitUNetModule(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
     
+    def predict_step(self, batch):
+        torch.set_grad_enabled(False)
+        imgs = batch['img']     # unpacking the batch
+        logits = self.model(imgs)   # this implicitly calls the forward method
+        return logits
+    
     def training_step(self, batch):
         torch.set_grad_enabled(True)
         losses, logits, masks, preds, soft_masks = self._shared_step(batch)
@@ -310,7 +316,7 @@ class LitUNetModule(pl.LightningModule):
                 dice_WT_loss = self.MonaiDiceBratsLoss(logits_WT, gt_WT_FG) * self.dsc_loss_w * self.hard_loss_w
 
         # Brats Soft Dice Losses for subregions equally weighted
-        if self.soft_dice_loss_w == 0:
+        if self.soft_dice_loss_w == 0 or self.hard_loss_w == 0:
             soft_dice_ET_loss = soft_dice_WT_loss = soft_dice_TC_loss = torch.tensor(0.0)
         else:
             if self.binary:
