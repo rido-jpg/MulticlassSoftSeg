@@ -22,8 +22,11 @@ def find_best_worst_subjects(df, metrics):
     return pd.DataFrame(results).T
 
 # Example usage
-metrics_to_analyze = ['et (3)-sq_dsc','wt (1, 2, 3)-sq_dsc','tc (1, 3)-sq_dsc', 'et (3)-global_bin_dsc','wt (1, 2, 3)-global_bin_dsc','tc (1, 3)-global_bin_dsc',]    # group name-metric
+metrics_to_analyze = ['et (3)-pq_dsc','wt (1, 2, 3)-pq_dsc','tc (1, 3)-pq_dsc', 'et (3)-global_bin_dsc','wt (1, 2, 3)-global_bin_dsc','tc (1, 3)-global_bin_dsc',]    # group name-metric
 results_df = find_best_worst_subjects(data_df, metrics_to_analyze)
 
 # Display results
+print(f"{tsv_dir.stem}:")
+
 print(results_df)
+
