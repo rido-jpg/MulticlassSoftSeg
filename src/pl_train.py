@@ -62,7 +62,9 @@ def parse_train_param(parser=None):
 
     parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
 
-    parser.add_argument("-softmax_temperature", type=float, default = None, help = "Use Softmax with chosen temperature on soft masks to change the distribution of probabilities. Lower temperature means wider range. Value of 1 equals normal Softmax")
+    parser.add_argument("-softmax_temperature", type=float, default = 0.1, help = "Use Softmax with chosen temperature on soft masks to change the distribution of probabilities. Lower temperature means wider range. Value of 1 equals normal Softmax")
+    parser.add_argument("-soft_gt_norm", type=str, default = "l1_norm", choices = ["l1_norm", "temp_scaled_softmax"], help = "Normalization to use for Soft GTs" )
+    parser.add_argument("-round", type = int, default = 5, help = "Number of decimals to round the soft GT to")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
     #parser.add_argument("-drop_last_val", action="store_true", default=False, help="drop last in validation set during training")
@@ -73,7 +75,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Adaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
-    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks. Recommended to use softmax with temperature if dilation is used")
+    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks. soft_gt_norm needs to be set to either l1_norm or temp_scaled_softmax if dilation is used")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
@@ -226,6 +228,9 @@ if __name__ == '__main__':
 
     if opt.no_augmentations:
         augmentations = None
+
+    if opt.dilate != 0 and get_option(opt, "soft_gt_norm", None):
+        raise Exception("If you use dilation you need to use a normalization method, so the probabilites for a voxel along the channels sum to 1. Choose between l1_norm and temp_scaled_softmax")
 
     if opt.dataset == 'brats':
         

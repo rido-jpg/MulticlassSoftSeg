@@ -153,8 +153,14 @@ def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: 
 
         img_tensor = soften_gt(img_tensor, opt.sigma)   # Apply Gaussian smoothing to the segmentation mask
 
-        if get_option(opt, "softmax_temperature", None) is not None:
-            img_tensor = temperature_scaled_softmax(img_tensor, dim = 0, temperature=opt.softmax_temperature)
+        if get_option(opt, "soft_gt_norm", None) is not None:
+            if opt.soft_gt_norm == "l1_norm":
+                img_tensor = l1_norm(img_tensor, dim = 0)
+            elif opt.soft_gt_norm == "temp_scaled_softmax":
+                img_tensor = temperature_scaled_softmax(img_tensor, dim = 0, temperature=opt.softmax_temperature)
+        
+        if get_option(opt, "round", None) is not None:
+            img_tensor.round(decimals = opt.round)
 
     else:
         img_tensor = img_tensor.unsqueeze(0)    # Add channel dimension to achieve desired shape [C, H, W, D]
