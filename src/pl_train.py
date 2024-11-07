@@ -75,7 +75,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-contrast", type=str, default='multimodal', choices= [modalities, 'multimodal'], help="Type of MRI images to be used")
     parser.add_argument("-soft", action="store_true", default=False, help="Use soft segmentation masks and regression loss (Adaptive Wing Loss) for training")
     parser.add_argument("-one_hot", action="store_true", default=False, help="Use one-hot encoding for the labels")
-    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks. Recommended to use softmax with temperature if dilation is used")
+    parser.add_argument("-dilate", type=int, default=0, help="Number of voxel neighbor layers to dilate to for soft masks. soft_gt_norm needs to be set to either l1_norm or temp_scaled_softmax if dilation is used")
     #
     parser.add_argument("-lr", type=float, default=1e-4, help="Learning rate of the network")
     parser.add_argument("-lr_end_factor", type=float, default=0.01, help="Linear End Factor for StepLR")
@@ -228,6 +228,9 @@ if __name__ == '__main__':
 
     if opt.no_augmentations:
         augmentations = None
+
+    if opt.dilate != 0 and get_option(opt, "soft_gt_norm", None):
+        raise Exception("If you use dilation you need to use a normalization method, so the probabilites for a voxel along the channels sum to 1. Choose between l1_norm and temp_scaled_softmax")
 
     if opt.dataset == 'brats':
         
