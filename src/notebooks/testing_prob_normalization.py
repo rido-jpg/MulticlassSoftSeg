@@ -41,7 +41,7 @@ def prob_normalization(probs, temperature = 0.1, scale  = 0.1):
     print_unique_etc(l1_norm(probs))
 
 def test_temp_softmax(probs):
-    values = (0.1, 0.15, 0.2)
+    values = (0.05, 0.1, 0.15)
     #print(f"normal vals:")
     #print_unique_etc(probs)
     print(f"------------------------------------")
@@ -53,9 +53,11 @@ def test_temp_softmax(probs):
 # %%
 dilate = 0
 sigma = 0.4
-temp = None
+temp = 0.1
+soft_gt_norm = 'temp_scaled_softmax'
+round = 3
 
-conf = Namespace(resize = (152, 192, 144), contrast = 'multimodal', one_hot = False,  sigma = sigma, do2D = False, soft=False, dilate=dilate, binary=False, ds_factor=None, experiment = 1, softmax_temperature=temp)
+conf = Namespace(resize = (152, 192, 144), contrast = 'multimodal', one_hot = False,  sigma = sigma, do2D = False, soft=False, dilate=dilate, binary=False, ds_factor=None, experiment = 1, softmax_temperature=temp, soft_gt_norm = soft_gt_norm, round = round )
 bids_ds = BidsDataset(conf, data_dir+'/train')
 
 sample = bids_ds[0]
@@ -63,15 +65,16 @@ sample_img = sample['img']
 sample_gt = sample['seg']
 sample_soft_gt = sample['soft_seg']
 # %% 
-#print_unique_etc(sample_soft_gt)
+print(f"dilate={dilate}, sigma={sigma}, temp={temp}, soft_gt_norm={soft_gt_norm}, round={round} ")
+print_unique_etc(sample_soft_gt)
 # print_unique_etc(sample_soft_gt.round(decimals = 6))
-print_unique_etc(sample_soft_gt.round(decimals = 5))
-print_unique_etc(sample_soft_gt.round(decimals = 4))
-print_unique_etc(sample_soft_gt.round(decimals = 3))
+# print_unique_etc(sample_soft_gt.round(decimals = 5))
+# print_unique_etc(sample_soft_gt.round(decimals = 4))
+# print_unique_etc(sample_soft_gt.round(decimals = 3))
 # %%
-dec = 3
-print(f"L1 Normalized Probs")
-print_unique_etc(l1_norm(sample_soft_gt).round(decimals = dec))
-print(f"Temperature Softmaxed Probs w Temp 0.1")
-print_unique_etc(temperature_scaled_softmax(sample_soft_gt, temperature=0.1).round(decimals = dec))
+# dec = 3
+# print(f"L1 Normalized Probs")
+# print_unique_etc(l1_norm(sample_soft_gt).round(decimals = dec))
+# print(f"Temperature Softmaxed Probs w Temp 0.1")
+# print_unique_etc(temperature_scaled_softmax(sample_soft_gt, temperature=0.1).round(decimals = dec))
 # %%
