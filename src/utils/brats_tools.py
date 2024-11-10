@@ -160,7 +160,7 @@ def preprocess(img_np:np.array, seg:bool, binary:bool, n_classes:int=None, opt: 
                 img_tensor = temperature_scaled_softmax(img_tensor, dim = 0, temperature=opt.softmax_temperature)
         
         if get_option(opt, "round", None) is not None:
-            img_tensor.round(decimals = opt.round)
+            img_tensor = img_tensor.round(decimals = opt.round)
 
     else:
         img_tensor = img_tensor.unsqueeze(0)    # Add channel dimension to achieve desired shape [C, H, W, D]
