@@ -63,7 +63,7 @@ def parse_train_param(parser=None):
     parser.add_argument("-activation", type=str, default="softmax", choices=["softmax", "relu"], help="Final activation function")
 
     parser.add_argument("-softmax_temperature", type=float, default = 0.1, help = "Use Softmax with chosen temperature on soft masks to change the distribution of probabilities. Lower temperature means wider range. Value of 1 equals normal Softmax")
-    parser.add_argument("-soft_gt_norm", type=str, default = "l1_norm", choices = ["l1_norm", "temp_scaled_softmax"], help = "Normalization to use for Soft GTs" )
+    parser.add_argument("-soft_gt_norm", type=str, default = None, choices = ["l1_norm", "temp_scaled_softmax"], help = "Normalization to use for Soft GTs" )
     parser.add_argument("-round", type = int, default = 5, help = "Number of decimals to round the soft GT to")
     #
     # action=store_true means that if the argument is present, it will be set to True, otherwise False
