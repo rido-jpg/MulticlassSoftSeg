@@ -267,6 +267,12 @@ def temperature_scaled_softmax(tensor, dim:int = 0, temperature=1.0):
     tensor = tensor / temperature
     return torch.softmax(tensor, dim=dim)
 
+def relu_l1_norm(logits, dim = 0):
+    relu_output = F.relu(logits)  # Apply ReLU
+    l1_norm = torch.linalg.vector_norm(relu_output, ord=1, dim=dim, keepdim=True)  # Compute L1 norm along C
+    l1_norm = torch.where(l1_norm == 0, torch.ones_like(l1_norm), l1_norm)  # Avoid division by zero
+    return relu_output / l1_norm
+
 def l1_norm(probs, dim:int = 0):
     return probs / probs.sum(dim=dim, keepdim=True)
 
