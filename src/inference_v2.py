@@ -70,7 +70,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
-    parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu"], help="Activation function for output layer")
+    parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu", "linear"], help="Activation function for output layer")
     parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
     parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices. Annotation is made in Axial Slices. Hence Coronal and Sagittal slices should show hard edges in GT.")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to predict. If 0, predict all samples in the dataset")
@@ -211,10 +211,15 @@ if __name__ == '__main__':
                     probs = relu(logits)/relu(logits).max()
                 else: 
                     probs = relu(logits)
+            if conf.activation == 'linear':
+                probs = logits
 
             preds = torch.argmax(probs, dim=1) # get class with highest probability
             preds_cpu = preds.cpu() # move tensor to cpu
-            del logits, probs, preds # delete tensors to free up memory
+            
+            del logits, preds # delete tensors to free up memory
+            if conf.soft == False:
+                del probs 
 
         preds_cpu = preds_cpu.type(torch.float16)    # change type of preds_cpu from torch.int64 to torch.float16
 
@@ -271,19 +276,22 @@ if __name__ == '__main__':
             # load soft ground truth segmentation
             soft_gt = dicts['soft_seg'] 
 
-            with torch.no_grad():
-                logits = model(img_tensor)  # get logits from model
+            # with torch.no_grad():
+            #     logits = model(img_tensor)  # get logits from model
 
-                if conf.activation == 'softmax':
-                    probs = softmax(logits) # apply softmax to get probabilities
-                elif conf.activation == 'relu':
-                    if bool(relu(logits).max()): # checking if the max value of the relu is not zero
-                        probs = relu(logits)/relu(logits).max()
-                    else: 
-                        probs = relu(logits)
-
-                probs_cpu = probs.cpu() # move tensor to cpu
-                del logits, probs # delete tensors to free up memory
+            #     if conf.activation == 'softmax':
+            #         probs = softmax(logits) # apply softmax to get probabilities
+            #     elif conf.activation == 'relu':
+            #         if bool(relu(logits).max()): # checking if the max value of the relu is not zero
+            #             probs = relu(logits)/relu(logits).max()
+            #         else: 
+            #             probs = relu(logits)
+            #     elif conf.activation == 'linear':
+            #         probs = logits
+                
+            probs_cpu = probs.cpu() # move tensor to cpu
+            del probs
+            # del logits, probs # delete tensors to free up memory
 
             prob_channels = []
             gt_channels = []
@@ -332,7 +340,7 @@ if __name__ == '__main__':
 
                     img_slice = get_central_slice(img_array, axis)
                 
-                    plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png",omit_background=True, show=False)
+                    plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png", show=False)
                     plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
  
         if samples > 0:
