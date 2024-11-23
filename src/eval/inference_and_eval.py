@@ -21,11 +21,15 @@ if __name__ == "__main__":
 
     inference_path= Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/inference_v2.py")
 
-    model_path= Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_1/3D_UNet/3D_UNet_v2_lr0.0001_soft_1.0_mse_1.0_sigma_0.125_softmax_exp_1_mse_loss")
+    model_path= Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_1/3D_UNet/3D_UNet_v0_lr0.0001_ce_1.0_hard_1.0_soft_1.0_soft_dice_1.0_sigma_0.125_softmax_Baseline_exp_1")
 
-    suffix = "_exp1_mse_softmax"
+    data_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
 
-    inf_args = ["-model_dir",str(model_path),"-niftis","-soft","-slices","-activation","softmax", "-suffix",suffix]
+    suffix = "_exp1_baseline_test_set"
+
+    activation = "softmax"
+
+    inf_args = ["-model_dir",str(model_path),"-niftis","-soft","-slices","-activation",activation, "-suffix",suffix, "-data_dir", str(data_dir)]
 
     # Run the script with the environment-specific Python interpreter
     result = subprocess.run([python_interpreter, inference_path] + inf_args, capture_output=True, text=True)
