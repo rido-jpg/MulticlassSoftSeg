@@ -143,6 +143,8 @@ if __name__ == '__main__':
     hparams = LitUNetModule.load_from_checkpoint(ckpt_path).hparams
     train_opt = hparams.get('opt')
 
+    experiment = get_option(train_opt, 'experiment', 1) # if no experiment indicator given, it was experiment 1
+
     contrast = get_option(train_opt, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
     
     if suffix is None:
@@ -223,10 +225,10 @@ if __name__ == '__main__':
 
         preds_cpu = preds_cpu.type(torch.float16)    # change type of preds_cpu from torch.int64 to torch.float16
 
-        preds_padded = resize(preds_cpu) # resize preds_cpu to original image size
-        preds_padded = preds_padded.squeeze(0) # get rid of batch dimension
+        preds_resized = resize(preds_cpu) # resize preds_cpu to original image size
+        preds_resized = preds_resized.squeeze(0) # get rid of batch dimension
 
-        preds_array = preds_padded.numpy() # convert to numpy array (dtype: float16)
+        preds_array = preds_resized.numpy() # convert to numpy array (dtype: float16)
 
         preds_array = preds_array.astype(np.uint8) # ensure correct type to be able to cast it to a NII object
 
