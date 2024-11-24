@@ -45,7 +45,9 @@ if __name__ == "__main__":
     preds_base_path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds")
     model_preds_path = preds_base_path / model_name 
 
-    eval_args = ["-preds_dir", str(model_preds_path)]
+    gt_dir = data_dir
+
+    eval_args = ["-preds_dir", str(model_preds_path), "-gt_dir", str(data_dir)]
 
     # Run the script with the environment-specific Python interpreter
     result = subprocess.run([python_interpreter, eval_path] + eval_args, capture_output=True, text=True)
