@@ -53,7 +53,10 @@ adw_high_sig = Panoptica_Statistic.from_file(adw_high_sig_path)
 
 # fig.write_image(out_figure)
 
-#%%
+# %%
+metric = "rq"
+suffix = ""     # start with _
+
 fig2 = make_curve_over_setups(
     {
         "mse_0.125": mse_low_sig,
@@ -63,9 +66,9 @@ fig2 = make_curve_over_setups(
         "baseline": baseline,
     },
     groups=("et (3)","tc (1, 3)", "wt (1, 2, 3)"),
-    metric="global_bin_dsc",
+    metric=metric,
 )
 
-out_figure = str(f"{eval_dir}/global_bin_dsc_brats_regions.png")
+out_figure = str(f"{eval_dir}/{metric}_brats_regions{suffix}.png")
 fig2.savefig(out_figure)
 # %%
