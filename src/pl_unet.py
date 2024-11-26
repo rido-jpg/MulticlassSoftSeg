@@ -453,6 +453,8 @@ class LitUNetModule(pl.LightningModule):
                 soft_mse_score = mF.mean_squared_error(self.relu(logits)/self.relu(logits).max(), soft_masks)
             else: 
                 soft_mse_score = mF.mean_squared_error(self.relu(logits), soft_masks)
+        elif self.final_activation == "linear":
+            soft_mse_score = mF.mean_squared_error(logits, soft_masks)
             
 
         return {
