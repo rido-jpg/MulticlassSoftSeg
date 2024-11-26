@@ -391,6 +391,8 @@ class LitUNetModule(pl.LightningModule):
                 probs = self.relu(logits)/self.relu(logits).max()
             else: 
                 probs = self.relu(logits)
+        elif self.final_activation == "linear":
+            probs = logits
 
         preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability -> argmax not differentiable
         del probs
