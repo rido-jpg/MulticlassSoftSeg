@@ -12,7 +12,7 @@ from pathlib import Path
 from argparse import Namespace
 from pl_unet import LitUNetModule
 from TPTBox import NII
-from utils.brats_tools import get_central_slice, plot_slices
+from utils.brats_tools import get_central_slice, plot_slice, postprocessing
 from monai.transforms import ResizeWithPadOrCrop, CastToType
 from torch import nn
 from data.bids_dataset import modalities, create_bids_path_list_of_dicts, BidsDataset, BidsDataModule
@@ -215,6 +215,8 @@ if __name__ == '__main__':
                     probs = relu(logits)
             if conf.activation == 'linear':
                 probs = logits
+
+            probs = postprocessing(probs, 2)    # kills all values < 0  and rounds to 2 decimals
 
             preds = torch.argmax(probs, dim=1) # get class with highest probability
             preds_cpu = preds.cpu() # move tensor to cpu
