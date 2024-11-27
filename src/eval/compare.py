@@ -54,7 +54,11 @@ adw_high_sig = Panoptica_Statistic.from_file(adw_high_sig_path)
 # fig.write_image(out_figure)
 
 # %%
-metric = "rq"
+#metric = "global_bin_dsc"
+#metric = "rq"
+#metric = "sq_dsc"
+#metric = "sq_assd"
+metric = "pq_dsc"
 suffix = ""     # start with _
 
 fig2 = make_curve_over_setups(
