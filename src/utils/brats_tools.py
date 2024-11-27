@@ -289,3 +289,16 @@ def get_option(opt: Namespace, attr: str, default, dtype: type = None):
 
     # option does not exist, return default
     return default
+
+def postprocessing(soft_scores, dec: int):
+    '''
+    kills all values smaller than one and rounds to a certain number of decimals
+
+    '''
+    if isinstance(soft_scores, np.ndarray):
+        soft_scores = np.maximum(0,soft_scores)
+    elif isinstance(soft_scores, torch.Tensor):
+        soft_scores = F.relu(soft_scores)
+        
+    soft_scores = soft_scores.round(decimals = dec)
+    return soft_scores
