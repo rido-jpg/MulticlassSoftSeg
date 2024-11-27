@@ -3,7 +3,7 @@ from panoptica.panoptica_statistics import Panoptica_Statistic, make_curve_over_
 from pathlib import Path
 import pandas as pd
 
-eval_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics")
+output_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics")
 
 baseline_path = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics/3D_UNet_v0__exp1_baseline_test_set.tsv"
 mse_low_sig_path = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics/3D_UNet_v2__exp_1_mse_lowest_sigma_linear_test_set.tsv"
@@ -69,6 +69,6 @@ fig2 = make_curve_over_setups(
     metric=metric,
 )
 
-out_figure = str(f"{eval_dir}/{metric}_brats_regions{suffix}.png")
+out_figure = str(f"{output_dir}/{metric}_brats_regions{suffix}.png")
 fig2.savefig(out_figure)
 # %%
