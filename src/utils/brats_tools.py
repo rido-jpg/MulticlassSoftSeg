@@ -290,15 +290,32 @@ def get_option(opt: Namespace, attr: str, default, dtype: type = None):
     # option does not exist, return default
     return default
 
-def postprocessing(soft_scores, dec: int):
-    '''
-    kills all values smaller than one and rounds to a certain number of decimals
+def postprocessing(soft_scores, dec: int = 3, smooth_to_zero: bool = False):
+    """
+    Applies post-processing to scores:
+    1. Ensures all values are >= 0 (using ReLU for PyTorch and np.maximum for NumPy).
+    2. Rounds to a specified number of decimals.
+    3. Optionally smooths values below a threshold of 0.05 (to 0) and above a threshold of 0.95 (to 1).
 
-    '''
+    Parameters:
+        soft_scores (np.ndarray or torch.Tensor): Input scores.
+        dec (int): Number of decimals to round to.
+        smooth_to_zero (bool): Whether to apply smoothing for values < 0.05 and > 0.95.
+
+    Returns:
+        np.ndarray or torch.Tensor: Processed scores.
+    """
+    # Ensure all values are >= 0
     if isinstance(soft_scores, np.ndarray):
-        soft_scores = np.maximum(0,soft_scores)
+        soft_scores = np.maximum(0, soft_scores)
     elif isinstance(soft_scores, torch.Tensor):
         soft_scores = F.relu(soft_scores)
-        
+    
     soft_scores = soft_scores.round(decimals = dec)
+    
+    # Optional smoothing (applies to both NumPy and PyTorch)
+    if smooth_to_zero:
+        soft_scores[soft_scores < 0.05] = 0.0
+        soft_scores[soft_scores > 0.95] = 1.0
+
     return soft_scores
