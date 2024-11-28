@@ -264,6 +264,9 @@ def load_nifti_as_array(file_path: str, seg:bool=False)->np.ndarray:
     return np.ascontiguousarray(nifti_np_array) # Ensure C-contiguity for fast numpy io
 
 def temperature_scaled_softmax(tensor, dim:int = 0, temperature=1.0):
+    """
+    Higher Temperature -> less squashing
+    """
     tensor = tensor / temperature
     return torch.softmax(tensor, dim=dim)
 
