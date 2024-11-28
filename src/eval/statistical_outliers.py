@@ -1,7 +1,8 @@
 import pandas as pd
 from pathlib import Path
 
-tsv_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics/3D_UNet_v2__exp1_mse_softmax.tsv")
+tsv_dir = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/model_statistics/exp2_3/3D_UNet_v1__exp2_and_3_baseline.tsv"
+tsv_dir = Path(tsv_dir)
 tsv_stem = tsv_dir.stem
 save_path = tsv_dir.with_name(f"{tsv_stem}_outliers.csv")
 
@@ -24,7 +25,8 @@ def find_best_worst_subjects(df, metrics):
     return pd.DataFrame(results).T
 
 # Example usage
-metrics_to_analyze = ['et (3)-pq_dsc','wt (1, 2, 3)-pq_dsc','tc (1, 3)-pq_dsc', 'et (3)-global_bin_dsc','wt (1, 2, 3)-global_bin_dsc','tc (1, 3)-global_bin_dsc',]    # group name-metric
+#metrics_to_analyze = ['et (3)-pq_dsc','wt (1, 2, 3)-pq_dsc','tc (1, 3)-pq_dsc', 'et (3)-global_bin_dsc','wt (1, 2, 3)-global_bin_dsc','tc (1, 3)-global_bin_dsc',]    # group name-metric
+metrics_to_analyze = ['mse','mae','avd_soft','rvd_soft','avd_soft_hard','rvd_soft_hard','avd_hard','rvd_hard']
 results_df = find_best_worst_subjects(data_df, metrics_to_analyze)
 
 results_df.to_csv(save_path)
