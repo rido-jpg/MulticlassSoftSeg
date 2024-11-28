@@ -243,7 +243,7 @@ if __name__ == '__main__':
                 if conf.activation == 'linear':
                     probs = logits
 
-                probs = postprocessing(probs, 2)    # kills all values < 0  and rounds to 2 decimals
+                probs = postprocessing(probs, 3, True)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
                 preds = torch.argmax(probs, dim=1) # get class with highest probability
                 preds_cpu = preds.cpu() # move tensor to cpu; shape [1, 80, 96, 72]
