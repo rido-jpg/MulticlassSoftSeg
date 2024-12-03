@@ -7,9 +7,12 @@ from argparse import Namespace
 from TPTBox import NII, np_utils
 import utils.fastnumpyio.fastnumpyio as fnio
 
-def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet'):
+def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, show=True, save_path=None, cmap_mri='gray', cmap_seg='jet', gt_slice = None):
 
     masked_seg_slice = np.where(seg_slice == 0, np.nan, seg_slice)  # Replace 0s with NaN, leave everything else unchanged
+
+    if gt_slice is not None:
+        masked_gt_slice = np.where(gt_slice == 0, np.nan, gt_slice)  # Replace 0s with NaN, leave everything else unchanged
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
 
@@ -17,8 +20,12 @@ def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, s
     ax[1].imshow(mri_slice.T, cmap=cmap_mri, origin='lower')
 
     # Give Titles to the plots
-    ax[0].set_title('MRI Slice')
-    ax[1].set_title('Segmentation Slice')
+    if gt_slice == None:
+        ax[0].set_title('MRI Slice')
+        ax[1].set_title('Segmentation Slice')
+    else:
+        ax[0].set_title('Ground Truth Slice')
+        ax[1].set_title('Prediction Slice')
 
     if plt_title:
         plt.suptitle(plt_title, fontsize=30)
@@ -26,8 +33,12 @@ def plot_slices(mri_slice, seg_slice, plt_title:str="" , omit_background=True, s
     if omit_background==True:
         # Only overlay areas where mask is True, with the segmentation mask using a colormap
         ax[1].imshow(masked_seg_slice.T, cmap=cmap_seg, alpha=0.5, origin='lower')
+        if gt_slice is not None:
+            ax[0].imshow(masked_gt_slice.T, cmap=cmap_seg, alpha=0.5, origin='lower')
     else:
         ax[1].imshow(seg_slice.T, cmap=cmap_seg, alpha = 0.5, origin='lower')      #Overlay with transparency
+        if gt_slice is not None:
+            ax[0].imshow(gt_slice.T, cmap=cmap_seg, alpha=0.5, origin='lower')
 
     if save_path:
         plt.savefig(save_path)  # Save the figure to the specified path
