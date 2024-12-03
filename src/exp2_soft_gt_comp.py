@@ -167,10 +167,9 @@ if __name__ == '__main__':
     columns = [
     "subject_name", 
     "mse_soft", "mae_soft",
-    "mse_hard", "mae_hard", 
+    "mse_soft_hard", "mae_soft_hard", 
     "avd_soft", "rvd_soft", 
     "avd_soft_hard", "rvd_soft_hard", 
-    "avd_hard", "rvd_hard"
     ]
 
 
@@ -223,6 +222,9 @@ if __name__ == '__main__':
             mse_soft = mF.mean_squared_error(mod_soft_gt[1], ref_soft_gt[1])
             mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ref_soft_gt[1])
 
+            mse_soft_hard = mF.mean_squared_error(mod_soft_gt[1], ref_gt[1])
+            mae_soft_hard = mF.mean_absolute_error(mod_soft_gt[1], ref_gt[1])
+
             avd_soft, rvd_soft = avd_rvd(mod_soft_gt_vol, ref_soft_gt_vol)
             avd_soft_hard, rvd_soft_hard = avd_rvd(mod_soft_gt_vol, ref_gt_vol)   # difference between gaussian created soft gt and hard gt volume
 
@@ -230,14 +232,12 @@ if __name__ == '__main__':
                 "subject_name": ref_subject,
                 "mse_soft": mse_soft.item(),
                 "mae_soft": mae_soft.item(),
-                # "mse_hard": None,
-                # "mae_hard": None,
+                "mse_soft_hard": mse_soft_hard.item(),
+                "mae_soft_hard": mae_soft_hard.item(),
                 "avd_soft": avd_soft.item(),
                 "rvd_soft": rvd_soft.item(),
                 "avd_soft_hard": avd_soft_hard.item(),
                 "rvd_soft_hard": rvd_soft_hard.item(),
-                # "avd_hard": None,
-                # "rvd_hard": None,
             }
 
             # Write the row for the current subject
