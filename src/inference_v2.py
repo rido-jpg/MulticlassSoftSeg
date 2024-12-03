@@ -80,7 +80,10 @@ def parse_inf_param(parser=None):
     #parser.add_argument("-gts", action='store_true', help="Save slices of the ground truth")
     parser.add_argument("-soft", action='store_true', help="Save channelwise soft predictions/probabilities")
 
+    parser.add_argument("-no_postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
+    parser.add_argument("-no_smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
 
+    parser.add_argument("-postprocess_gt", action="store_true", help = "In case you want to apply the same postprocessing, to the model outputs and soft ground truths")
     return parser
 
 def _extract_unet_version(path: Path) -> str:
@@ -110,6 +113,16 @@ if __name__ == '__main__':
     data_dir : Path = Path(conf.data_dir)
     save_dir : Path = Path(conf.save_dir)
     ckpt_path = get_best_checkpoint(model_path)
+
+    if conf.no_postprocessing:
+        postprocess = False
+    else:
+        postprocess = True
+
+    if conf.no_smoothing:
+        smooth = False
+    else: 
+        smooth = True
 
     print(f"Best checkpoint: {ckpt_path.name}")
 
@@ -216,7 +229,8 @@ if __name__ == '__main__':
             if conf.activation == 'linear':
                 probs = logits
 
-            robs = postprocessing(probs, 3, True)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+            if postprocessing:
+                    probs = postprocessing(probs, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             preds = torch.argmax(probs, dim=1) # get class with highest probability
             preds_cpu = preds.cpu() # move tensor to cpu
@@ -264,10 +278,10 @@ if __name__ == '__main__':
                     img_array = fnio.load(str(bids_val_ds.bids_list[idx][contrast]))
 
                 img_slice = get_central_slice(img_array, axis)
-                plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path= save_path / f"slices" /  f"{subject}-{contrast}-{conf.axis}-slice-pred-{suffix}.png", show=False)
+                plot_slices(img_slice, pred_slice,plt_title='Prediction '+ suffix , save_path= save_path / f"slices" /  f"{subject}-{contrast}-{conf.axis}-slice-pred-{suffix}.png", show=False, gt_slice=gt_slice)
                 # if save_gts:
                 #     plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
-                plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
+                #plot_slices(img_slice, gt_slice, plt_title='Ground Truth',save_path=save_path / f"slices" / f"{subject}-{contrast}-{conf.axis}-slice-gt.png", show = False)
 
         
         if conf.soft:
@@ -279,6 +293,9 @@ if __name__ == '__main__':
 
             # load soft ground truth segmentation
             soft_gt = dicts['soft_seg'] 
+
+            if conf.postprocess_gt:
+                soft_gt = postprocessing(soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             # with torch.no_grad():
             #     logits = model(img_tensor)  # get logits from model
@@ -344,8 +361,8 @@ if __name__ == '__main__':
 
                     img_slice = get_central_slice(img_array, axis)
                 
-                    plot_slices(img_slice, prob_slice,plt_title=f"Predicted probability channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-probability-class-{channel}-{suffix}.png", show=False)
-                    plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
+                    plot_slices(img_slice, prob_slice,plt_title=f"Predicted soft score channel {channel} {suffix} ", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-prob-class-{channel}-sigma-{train_opt.sigma}-{suffix}.png", show=False, gt_slice = gt_slice)
+                    #plot_slices(img_slice, gt_slice, plt_title=f"Soft GT probability channel {channel} sigma {train_opt.sigma}", save_path=soft_save_path / f"slices" / f"{subject}-t1c-{conf.axis}-slice-soft_gt-class-{channel}-sigma-{train_opt.sigma}.png", show=False)
  
         if samples > 0:
             if idx == (samples - 1):
