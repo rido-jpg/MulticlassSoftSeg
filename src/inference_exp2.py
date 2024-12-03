@@ -198,7 +198,7 @@ if __name__ == '__main__':
     hparams = LitUNetModule.load_from_checkpoint(ckpt_path).hparams
     train_opt = hparams.get('opt')
 
-    experiment = get_option(train_opt, 'experiment', 1) # if no experiment indicator given, it was experiment 1
+    experiment = 2  # we always want to load the downsampled ground truths as reference
 
     contrast = get_option(train_opt, 'contrast', 't2f')  # if the contrast is not part of hparams, it is an old ckpt which used 't2f'
     
