@@ -378,7 +378,7 @@ if __name__ == '__main__':
         log_every_n_steps=10, 
         accelerator='gpu',
         devices = -1,
-        detect_anomaly=True,
+        detect_anomaly=False,   #only use for debugging as it slows down training
         logger=logger,
         callbacks=callbacks, 
         #profiler=profiler,
