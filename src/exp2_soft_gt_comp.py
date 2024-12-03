@@ -109,15 +109,12 @@ def parse_inf_param(parser=None):
     
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
 
-    parser.add_argument("-no_postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
-    parser.add_argument("-no_smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
+    parser.add_argument("-postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
+    parser.add_argument("-smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
 
     parser.add_argument("-postprocess_gt", action="store_true", help = "In case you want to apply the same postprocessing, to the model outputs and soft ground truths")
 
     return parser
-
-softmax = nn.Softmax(dim=1)
-relu = nn.ReLU()
 
 if __name__ == '__main__':
 
@@ -129,43 +126,39 @@ if __name__ == '__main__':
     parser = parse_inf_param()
     conf = parser.parse_args()
 
-    # eval_dir : Path = Path(conf.eval_dir)
-    # data_dir : Path = Path(conf.data_dir)
+    eval_dir : Path = Path(conf.eval_dir)
+    data_dir : Path = Path(conf.data_dir)
     setup_path : Path = Path(conf.setup_dir)
     suffix = conf.suffix
 
-    data_dir : Path = Path("data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
-    eval_dir : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval")
-    #setup_path : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v4_lr0.0001_soft_1.0_mse_1.0_down_factor_2_sigma_0.125_binary_linear_exp_3_mse_sigma_0.125")
-    #suffix = "sig_0.125"
-    ckpt_path = get_best_checkpoint(setup_path)
+    down_path :Path = ("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline")
+    down_ckpt_path = get_best_checkpoint(down_path)
 
-    if conf.no_postprocessing:
-        postprocess = False
-    else:
-        postprocess = True
+    # data_dir : Path = Path("data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
+    # eval_dir : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval")
+    # setup_path : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v4_lr0.0001_soft_1.0_mse_1.0_down_factor_2_sigma_0.125_binary_linear_exp_3_mse_sigma_0.125")
+    # suffix = "test"
 
-    if conf.no_smoothing:
-        smooth = False
-    else: 
-        smooth = True
+    comp_ckpt_path = get_best_checkpoint(setup_path)
 
-    print(f"Best checkpoint: {ckpt_path.name}")
+    print(f"Best checkpoint: {comp_ckpt_path.name}")
         
     # try if torch.load works, otherwise raise an error and exit
     try:
-        checkpoint = torch.load(ckpt_path)
+        checkpoint = torch.load(comp_ckpt_path)
     except Exception as e:
-        print(f"Error: Invalid checkpoint path or file not found: {ckpt_path}")
+        print(f"Error: Invalid checkpoint path or file not found: {comp_ckpt_path}")
         sys.exit(1)
 
     # load hparams from checkpoint to get contrast
-    hparams = LitUNetModule.load_from_checkpoint(ckpt_path).hparams
-    train_opt_comp = hparams.get('opt')
+    hparams_comp = LitUNetModule.load_from_checkpoint(comp_ckpt_path).hparams
+    comp_train_opt = hparams_comp.get('opt')
 
-    train_opt_down = train_opt_comp
-    train_opt_down.experiment = 2
+    hparams_down = LitUNetModule.load_from_checkpoint(down_ckpt_path).hparams
+    down_train_opt = hparams_down.get('opt')
 
+    print(comp_train_opt.experiment)
+    print(down_train_opt.experiment)
 
     ###### CREATING TSV FOR SAVING THE SOFT METRICS
     output_file = os.path.join(eval_dir, f"{suffix}_comparison.tsv")
@@ -180,9 +173,10 @@ if __name__ == '__main__':
     "avd_hard", "rvd_hard"
     ]
 
+
     # create BidsDataset instance
-    bids_test_down_ds = BidsDataset(train_opt_down, data_dir)
-    bids_test_comp_ds = BidsDataset(train_opt_comp, data_dir)
+    bids_test_down_ds = BidsDataset(down_train_opt, data_dir)
+    bids_test_comp_ds = BidsDataset(comp_train_opt, data_dir)
 
     # Open the .tsv file for writing
     with open(output_file, mode='w', newline='') as file:
@@ -192,6 +186,7 @@ if __name__ == '__main__':
         for idx, dict in enumerate(zip(bids_test_down_ds,bids_test_comp_ds)):
             down_dict = dict[0]
             mod_dict = dict[1]
+
             ref_subject = bids_test_down_ds.bids_list[idx]['subject']
             mod_subject = bids_test_comp_ds.bids_list[idx]['subject']
 
@@ -205,11 +200,19 @@ if __name__ == '__main__':
 
             mod_soft_gt = mod_dict['soft_seg']
 
-            if postprocessing:
-                mod_soft_gt = postprocessing(mod_soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+            # down_img = down_dict['img'][0]
+            # down_img_slice = get_central_slice(down_img)
+
+            # down_soft_gt_slice = get_central_slice(ref_soft_gt[1])
+            # mod_soft_gt_slice = get_central_slice(mod_soft_gt[1])
+
+            # plot_slices(down_img_slice, mod_soft_gt_slice, show = True, save_path=f"{eval_dir}/img.png", gt_slice=down_soft_gt_slice)
+
+            if conf.postprocessing:
+                mod_soft_gt = postprocessing(mod_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             if conf.postprocess_gt:
-                ref_soft_gt = postprocessing(ref_soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+                ref_soft_gt = postprocessing(ref_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             ref_gt_vol = ref_gt.sum()     # just sum all ones
             ref_soft_gt_vol = ref_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
@@ -217,8 +220,8 @@ if __name__ == '__main__':
             mod_soft_gt_vol = mod_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
 
             ## EVAL OF SOFT SCORES/PROBABILITES OUTPUT BY MODEL AND NATURALLY CREATED SOFT GTs THROUGH DOWNSAMPLING
-            mse_soft = mF.mean_squared_error(mod_soft_gt, ref_soft_gt)
-            mae_soft = mF.mean_absolute_error(mod_soft_gt, ref_soft_gt)
+            mse_soft = mF.mean_squared_error(mod_soft_gt[1], ref_soft_gt[1])
+            mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ref_soft_gt[1])
 
             avd_soft, rvd_soft = avd_rvd(mod_soft_gt_vol, ref_soft_gt_vol)
             avd_soft_hard, rvd_soft_hard = avd_rvd(mod_soft_gt_vol, ref_gt_vol)   # difference between gaussian created soft gt and hard gt volume
