@@ -154,6 +154,8 @@ if __name__ == '__main__':
     data_dir : Path = Path(conf.data_dir)
     save_dir : Path = Path(conf.save_dir)
     eval_dir : Path = Path(conf.eval_dir)
+    down_dir : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline")
+    down_ckpt_path = get_best_checkpoint(down_dir)
     ckpt_path = get_best_checkpoint(model_path)
 
     if conf.no_postprocessing:
@@ -249,8 +251,10 @@ if __name__ == '__main__':
 
     # print(logits.shape)
 
-    # create BidsDataset instance
-    bids_val_ds = BidsDataset(train_opt, data_dir)
+    # create BidsDataset instance of downsampled reference GTs
+    down_hparams = LitUNetModule.load_from_checkpoint(down_ckpt_path).hparams
+    down_opt = down_hparams.get('opt')
+    bids_val_ds = BidsDataset(down_opt, data_dir)
 
     # Open the .tsv file for writing
     with open(output_file, mode='w', newline='') as file:
@@ -258,12 +262,12 @@ if __name__ == '__main__':
         writer.writeheader()  # Write the header row
 
         for idx, dicts in enumerate(bids_val_ds):
-            img = dicts['img']      # shape [4, 80, 96, 72]
-            gt = dicts['seg']       # shape [1, 80, 96, 72]
-            soft_gt = dicts['soft_seg'] #shape [2, 80, 96, 72]
+            img = dicts['img']      # shape [4, 80, 96, 72] stacked images, same for exp2 and 3, thus we can use the one from the train conf of the baseline
+            rebinarized_gt = dicts['seg']       # shape [1, 80, 96, 72] rebinarized hard gt from soft reference gt
+            ds_soft_gt = dicts['soft_seg'] #shape [2, 80, 96, 72]   reference soft gt created by downsampling
 
-            gt_vol = gt.sum()     # just sum all ones
-            soft_gt_vol = soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
+            rebinarized_gt_vol = rebinarized_gt.sum()     # just sum all ones
+            ds_soft_gt_vol = ds_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
 
             subject = bids_val_ds.bids_list[idx]['subject']
 
@@ -304,18 +308,18 @@ if __name__ == '__main__':
                 # del probs
 
             if conf.postprocess_gt:
-                soft_gt = postprocessing(soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+                ds_soft_gt = postprocessing(ds_soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             ## EVAL OF SOFT SCORES/PROBABILITES OUTPUT BY MODEL AND NATURALLY CREATED SOFT GTs THROUGH DOWNSAMPLING
-            mse_soft = mF.mean_squared_error(probs_cpu, soft_gt)
-            mae_soft = mF.mean_absolute_error(probs_cpu, soft_gt)
-            mse_hard = mF.mean_squared_error(preds_cpu, gt)
-            mae_hard = mF.mean_absolute_error(preds_cpu, gt)
+            mse_soft = mF.mean_squared_error(probs_cpu[1], ds_soft_gt[1])
+            mae_soft = mF.mean_absolute_error(probs_cpu[1], ds_soft_gt[1])
+            mse_hard = mF.mean_squared_error(preds_cpu, rebinarized_gt)
+            mae_hard = mF.mean_absolute_error(preds_cpu, rebinarized_gt)
             probs_vol = probs_cpu[1].sum()    # sum of floats along foregound channel
             preds_vol = preds_cpu.sum()
-            avd_soft, rvd_soft = avd_rvd(probs_vol, soft_gt_vol)
-            avd_soft_hard, rvd_soft_hard = avd_rvd(probs_vol, gt_vol)   # difference between predicted soft scores and hard gt volume
-            avd_hard, rvd_hard = avd_rvd(preds_vol, gt_vol)
+            avd_soft, rvd_soft = avd_rvd(probs_vol, ds_soft_gt_vol)
+            avd_soft_hard, rvd_soft_hard = avd_rvd(probs_vol, rebinarized_gt_vol)   # difference between predicted soft scores and hard gt volume
+            avd_hard, rvd_hard = avd_rvd(preds_vol, rebinarized_gt_vol)
 
             # Generate random data for demonstration; replace with actual calculations
             data = {
