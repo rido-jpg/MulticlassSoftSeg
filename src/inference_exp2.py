@@ -20,10 +20,42 @@ from data.bids_dataset import modalities, create_bids_path_list_of_dicts, BidsDa
 import lightning.pytorch as pl
 import time
 import torchmetrics.functional as mF
+import pandas as pd
 
 # file = Path(__file__).resolve()
 # sys.path.append(str(file.parents[1]))
 # sys.path.append(str(file.parents[2]))
+
+def compute_metrics_summary(file_path, save_dir, model_name):
+    # Load the TSV file
+    data = pd.read_csv(file_path, sep='\t')
+
+    # Compute average and standard deviation for each metric (excluding 'subject_name')
+    metrics_summary = {}
+    metrics = data.columns.drop('subject_name')  # Exclude the 'subject_name' column
+
+    for metric in metrics:
+        avg = data[metric].mean()
+        std = data[metric].std()
+        metrics_summary[metric] = (avg, std)
+
+    # Transform the data into a format suitable for CSV
+    rows = []
+    for metric, (avg, std) in metrics_summary.items():
+        rows.append({
+            'Metric': metric,
+            'Average': avg,
+            'StdDev': std
+        })
+
+    # Create a DataFrame for saving
+    summary_df = pd.DataFrame(rows)
+
+    # Save the DataFrame as a CSV file
+    summary_df.to_csv(save_dir.joinpath(f"{model_name}_summary.csv"), index=False)
+
+    # Display the DataFrame
+    print(summary_df)
 
 def avd_rvd(abs_predicted_vol, abs_reference_vol):
     avd = abs_predicted_vol - abs_reference_vol
@@ -88,6 +120,10 @@ def parse_inf_param(parser=None):
     #parser.add_argument("-gts", action='store_true', help="Save slices of the ground truth")
     parser.add_argument("-soft", action='store_true', help="Save channelwise soft predictions/probabilities")
 
+    parser.add_argument("-no_postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
+    parser.add_argument("-no_smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
+
+    parser.add_argument("-postprocess_gt", action="store_true", help = "In case you want to apply the same postprocessing, to the model outputs and soft ground truths")
 
     return parser
 
@@ -119,6 +155,16 @@ if __name__ == '__main__':
     save_dir : Path = Path(conf.save_dir)
     eval_dir : Path = Path(conf.eval_dir)
     ckpt_path = get_best_checkpoint(model_path)
+
+    if conf.no_postprocessing:
+        postprocess = False
+    else:
+        postprocess = True
+
+    if conf.no_smoothing:
+        smooth = False
+    else: 
+        smooth = True
 
     print(f"Best checkpoint: {ckpt_path.name}")
 
@@ -243,7 +289,8 @@ if __name__ == '__main__':
                 if conf.activation == 'linear':
                     probs = logits
 
-                probs = postprocessing(probs, 3, True)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+                if postprocessing:
+                    probs = postprocessing(probs, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
                 preds = torch.argmax(probs, dim=1) # get class with highest probability
                 preds_cpu = preds.cpu() # move tensor to cpu; shape [1, 80, 96, 72]
@@ -255,6 +302,9 @@ if __name__ == '__main__':
                 # if conf.soft:
                 #     probs_cpu = probs.cpu() # move tensor to cpu
                 # del probs
+
+            if conf.postprocess_gt:
+                soft_gt = postprocessing(soft_gt, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             ## EVAL OF SOFT SCORES/PROBABILITES OUTPUT BY MODEL AND NATURALLY CREATED SOFT GTs THROUGH DOWNSAMPLING
             mse_soft = mF.mean_squared_error(probs_cpu, soft_gt)
@@ -288,6 +338,7 @@ if __name__ == '__main__':
             if test_loop:     
                 # for testing purposes -> exit after one iteration
                 break
+    compute_metrics_summary(output_file, eval_dir, model_name)
 
             # base_path : Path = data_dir / subject 
             # save_path : Path = save_dir / model_name / subject / f"standard"
