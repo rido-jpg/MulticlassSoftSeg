@@ -104,7 +104,7 @@ def parse_inf_param(parser=None):
         parser = argparse.ArgumentParser()
     
     parser.add_argument("-setup_dir", type=str, default = None, help="Path to a model log folder using the soft GTs you want to evaluate. Script will automatically obtain the path of the best cpkt (best DiceFG)")
-    parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
+    parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test", help="Path to the data directory")
     parser.add_argument("-eval_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval", help="Path to the directory where the eval.tsv should be saved")
     
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
