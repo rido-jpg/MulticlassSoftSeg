@@ -106,6 +106,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-setup_dir", type=str, default = None, help="Path to a model log folder using the soft GTs you want to evaluate. Script will automatically obtain the path of the best cpkt (best DiceFG)")
     parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test", help="Path to the data directory")
     parser.add_argument("-eval_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval", help="Path to the directory where the eval.tsv should be saved")
+    parser.add_argument("-ref_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline", help="Path to model log folder of reference soft GT and hard GT")
     
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
 
@@ -129,17 +130,18 @@ if __name__ == '__main__':
     eval_dir : Path = Path(conf.eval_dir)
     data_dir : Path = Path(conf.data_dir)
     setup_path : Path = Path(conf.setup_dir)
+    ref_path : Path = Path(conf.ref_dir)
     suffix = conf.suffix
-
-    down_path :Path = ("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline")
-    down_ckpt_path = get_best_checkpoint(down_path)
 
     # data_dir : Path = Path("data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
     # eval_dir : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval")
     # setup_path : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v4_lr0.0001_soft_1.0_mse_1.0_down_factor_2_sigma_0.125_binary_linear_exp_3_mse_sigma_0.125")
+    #ref_path :Path = ("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline")
     # suffix = "test"
 
     comp_ckpt_path = get_best_checkpoint(setup_path)
+    ref_ckpt_path = get_best_checkpoint(ref_path)
+
 
     print(f"Best checkpoint: {comp_ckpt_path.name}")
         
@@ -154,11 +156,8 @@ if __name__ == '__main__':
     hparams_comp = LitUNetModule.load_from_checkpoint(comp_ckpt_path).hparams
     comp_train_opt = hparams_comp.get('opt')
 
-    hparams_down = LitUNetModule.load_from_checkpoint(down_ckpt_path).hparams
-    down_train_opt = hparams_down.get('opt')
-
-    print(comp_train_opt.experiment)
-    print(down_train_opt.experiment)
+    hparams_ref = LitUNetModule.load_from_checkpoint(ref_ckpt_path).hparams
+    ref_train_opt = hparams_ref.get('opt')
 
     ###### CREATING TSV FOR SAVING THE SOFT METRICS
     output_file = os.path.join(eval_dir, f"{suffix}_comparison.tsv")
@@ -174,19 +173,25 @@ if __name__ == '__main__':
 
 
     # create BidsDataset instance
-    bids_test_down_ds = BidsDataset(down_train_opt, data_dir)
+    bids_test_ref_ds = BidsDataset(ref_train_opt, data_dir)
     bids_test_comp_ds = BidsDataset(comp_train_opt, data_dir)
+
+    print(f"Reference Soft GT Experiment: {ref_train_opt.experiment}")
+    if ref_train_opt.experiment == 3:
+        print(f"Sigma of Reference Soft GT: {ref_train_opt.sigma}")
+    print(f"Soft GT to be compared: {comp_train_opt.experiment}")
+    print(f"Sigma of compared soft GT: {comp_train_opt.sigma}")
 
     # Open the .tsv file for writing
     with open(output_file, mode='w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=columns, delimiter='\t')
         writer.writeheader()  # Write the header row
 
-        for idx, dict in enumerate(zip(bids_test_down_ds,bids_test_comp_ds)):
+        for idx, dict in enumerate(zip(bids_test_ref_ds,bids_test_comp_ds)):
             down_dict = dict[0]
             mod_dict = dict[1]
 
-            ref_subject = bids_test_down_ds.bids_list[idx]['subject']
+            ref_subject = bids_test_ref_ds.bids_list[idx]['subject']
             mod_subject = bids_test_comp_ds.bids_list[idx]['subject']
 
             assert ref_subject == mod_subject, f"ref_subject: {ref_subject} should be equal to mod_subject: {mod_subject}"
@@ -199,13 +204,18 @@ if __name__ == '__main__':
 
             mod_soft_gt = mod_dict['soft_seg']
 
+            # ### PRINT IMAGES FOR TESTING ####
+
             # down_img = down_dict['img'][0]
             # down_img_slice = get_central_slice(down_img)
 
             # down_soft_gt_slice = get_central_slice(ref_soft_gt[1])
             # mod_soft_gt_slice = get_central_slice(mod_soft_gt[1])
 
-            # plot_slices(down_img_slice, mod_soft_gt_slice, show = True, save_path=f"{eval_dir}/img.png", gt_slice=down_soft_gt_slice)
+            # plot_slices(down_img_slice, mod_soft_gt_slice, show = True, save_path=f"{eval_dir}/{suffix}_img.png", gt_slice=down_soft_gt_slice)
+
+            # ### PRINT IMAGES FOR TESTING ####
+
 
             if conf.postprocessing:
                 mod_soft_gt = postprocessing(mod_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
@@ -222,8 +232,8 @@ if __name__ == '__main__':
             mse_soft = mF.mean_squared_error(mod_soft_gt[1], ref_soft_gt[1])
             mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ref_soft_gt[1])
 
-            mse_soft_hard = mF.mean_squared_error(mod_soft_gt[1], ref_gt[1])
-            mae_soft_hard = mF.mean_absolute_error(mod_soft_gt[1], ref_gt[1])
+            mse_soft_hard = mF.mean_squared_error(mod_soft_gt[1], ref_gt.squeeze(0))
+            mae_soft_hard = mF.mean_absolute_error(mod_soft_gt[1], ref_gt.squeeze(0))
 
             avd_soft, rvd_soft = avd_rvd(mod_soft_gt_vol, ref_soft_gt_vol)
             avd_soft_hard, rvd_soft_hard = avd_rvd(mod_soft_gt_vol, ref_gt_vol)   # difference between gaussian created soft gt and hard gt volume
