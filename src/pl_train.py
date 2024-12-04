@@ -50,8 +50,10 @@ def parse_train_param(parser=None):
 
     parser.add_argument("-experiment", type=int, default = None, choices = [1, 2, 3], help = "Experiment Setups: 1: MultiClass Segmentation; 2: Binary Segmentation on Downsampled (Soft Mask created through downsampling); 3: Binary Segmentation on Downsampled (Soft Mask created through gaussian kernel on top of rebinarized hard GT)") 
 
+    parser.add_argument("-ckpt_path", type = str, default = None, help = "Pass path to ckpt if you want to resume training")
+
     parser.add_argument("-bs", type=int, default=1, help="Batch size")
-    parser.add_argument("-epochs", type=int, default=400, help="Number of epochs")
+    parser.add_argument("-epochs", type=int, default=200, help="Number of epochs")
     parser.add_argument("-n_cpu", type=int, default=20, help="Number of cpu workers")   # I have 20 CPU Cores
     parser.add_argument("-groups", type=int, default=8, help="Number of groups for group normalization")
     parser.add_argument("-dim", type=int, default=16, help="Number of filters in the first layer (has to be divisible by number of groups)")
@@ -390,4 +392,4 @@ if __name__ == '__main__':
 
 
     # Train the model
-    trainer.fit(model, datamodule=data_module)
+    trainer.fit(model, ckpt_path=opt.ckpt_path, datamodule=data_module)
