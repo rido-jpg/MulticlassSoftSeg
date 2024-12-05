@@ -166,11 +166,14 @@ if __name__ == '__main__':
     model_name = f"{_extract_unet_version(ckpt_path)}_{suffix}"
     print(f"Model name: {model_name}")
 
-    model_input_size = get_option(train_opt, 'resize', [200, 200, 152])
+    #model_input_size = get_option(train_opt, 'resize', [200, 200, 152])
 
-    print(f"Model input size: {model_input_size}")
+    #print(f"Model input size: {model_input_size}")
 
-    og_img_size = [240,240,155]
+    if experiment == 1:
+        og_img_size = [240,240,155]
+    else:
+        og_img_size = [120, 120, 78]    # downsampled size for experiment 2 and 3
 
     resize = ResizeWithPadOrCrop(og_img_size)
     #crop = ResizeWithPadOrCrop(model_input_size)
