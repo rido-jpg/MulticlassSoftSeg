@@ -20,6 +20,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 from multiprocessing import set_start_method
 import pandas as pd
+import numpy as np
 
 from TPTBox import NII
 
@@ -33,6 +34,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to evaluate. If 0, evaluate all predictions")
     parser.add_argument("-config", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/panoptica_evaluator_BRATS.yaml", help="Name of the configuration file to use for the evaluation")
+    parser.add_argument("-exp2", action='store_true', help = "For experiment 2, load soft GTs and binarize them on the fly")
 
     return parser
 
@@ -55,9 +57,13 @@ def _get_gt_paths(gt_dir : Path) -> list:
     gt_paths = list(gt_dir.rglob("*seg.nii.gz"))
     return gt_paths
 
-def _proc(evaluator, pred: Path, gt: Path):
+def _proc(evaluator, pred: Path, gt: Path, binarize_gt:bool = False):
     pred_arr = NII.load(pred, True).get_seg_array()
-    gt_arr = NII.load(gt, True).get_seg_array()
+    if binarize_gt:
+        soft_gt_arr = NII.load(gt, False).get_seg_array()
+        gt_arr = np.argmax(soft_gt_arr, dim=0) # get class with highest soft score
+    else:
+        gt_arr = NII.load(gt, True).get_seg_array()
     if _extract_brats_id(str(pred)) != _extract_brats_id(str(gt)):
         # throw assertion error
         raise Exception(f"The prediction and ground truth do not match. Prediction subject: {_extract_brats_id(str(pred))}, Ground truth subject: {_extract_brats_id(str(gt))}")
@@ -126,7 +132,7 @@ if __name__ == "__main__":
        iterations = len(pred_paths)
 
     with ProcessPoolExecutor() as executor:
-        futures = {executor.submit( _proc, evaluator, pred_paths[idx], gt_paths[idx]) for idx in range(iterations)}
+        futures = {executor.submit( _proc, evaluator, pred_paths[idx], gt_paths[idx], binarize_gt=conf.exp2) for idx in range(iterations)}
         for future in tqdm(
             as_completed(futures), total=len(futures), desc="Panoptica Evaluation"
         ):
