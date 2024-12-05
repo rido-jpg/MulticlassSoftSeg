@@ -1,3 +1,4 @@
+# %%
 import os
 import torch
 import re
@@ -11,7 +12,7 @@ import pandas as pd
 # file = Path(__file__).resolve()
 # sys.path.append(str(file.parents[1]))
 # sys.path.append(str(file.parents[2]))
-
+# %%
 def _get_gt_paths(gt_dir : Path) -> list:
     gt_dir : Path = Path(gt_dir)
     gt_paths = list(gt_dir.rglob("*seg.nii.gz"))
@@ -64,7 +65,7 @@ def avd_rvd(abs_predicted_vol, abs_reference_vol):
     avd = abs_predicted_vol - abs_reference_vol
     rvd = avd / abs_reference_vol
     return avd, rvd
-
+ # %%
 if __name__ == '__main__':
 
     t = time.process_time()
@@ -74,6 +75,8 @@ if __name__ == '__main__':
     data_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
     
     suffix = "ds_soft_rebin_hard_og_hard_vol"
+    #suffix = "test"
+    scaling_factor = 2*2*2
 
     og_hard_gt_list = _get_gt_paths(data_dir)
 
@@ -90,7 +93,7 @@ if __name__ == '__main__':
     "avd_ds_soft_og_hard", "rvd_ds_soft_og_hard",
     "avd_rebin_hard_og_hard", "rvd_rebin_hard_og_hard"
     ]
-
+    # %%
     # Open the .tsv file for writing
     with open(output_file, mode='w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=columns, delimiter='\t')
@@ -108,18 +111,21 @@ if __name__ == '__main__':
             print(f"---------------------------------")
             print(f"Subject: {og_subject}")
 
-            og_hard_gt_arr = NII.load(og_hard_gt_path, True).get_array()  # shape [1, 80, 96, 72]
-            og_hard_gt = torch.from_numpy(og_hard_gt_arr)
+            og_hard_gt_arr = NII.load(og_hard_gt_path, True).get_array()
+            og_hard_gt = torch.from_numpy(og_hard_gt_arr).type(torch.uint8)   # [240, 240, 155]
             ds_soft_gt_arr = NII.load(soft_gt_path, False).get_array()
-            ds_soft_gt = torch.from_numpy(ds_soft_gt_arr) #shape [2, 80, 96, 72]
+            ds_soft_gt = torch.from_numpy(ds_soft_gt_arr) #   [120, 120, 78]
 
-            rebin_hard_gt = torch.argmax(ds_soft_gt, dim = 0)
-
-            # print(f"og_hard_gt.shape: {og_hard_gt.shape}")
-            # print(f"ds_soft_gt.shape: {ds_soft_gt.shape}")
-            # print(f"rebin_hard_gt.shape: {rebin_hard_gt.shape}")
+            rebin_hard_gt = (ds_soft_gt >= 0.5).type(torch.uint8)   # größer gleich, da torch.round bei 0.5 abrundet
+            # %%
+            # print(f"og_hard_gt.shape {og_hard_gt.shape}")
+            # print(f"ds_soft_gt.shape {ds_soft_gt.shape}")
+            # print(f"rebin_hard_gt.shape {rebin_hard_gt.shape}")
+            # # %%
+            # print(f"torch.unique(og_hard_gt, return_counts=True) {torch.unique(og_hard_gt, return_counts=True)}")
+            # print(f"torch.unique(ds_soft_gt.shape, return_counts=True) {torch.unique(ds_soft_gt, return_counts=True)}")
+            # print(f"torch.unique(rebin_hard_gt, return_counts=True) {torch.unique(rebin_hard_gt, return_counts=True)}")
         
-            
             # ### PRINT IMAGES FOR TESTING ####
 
             # down_img = down_dict['img'][0]
@@ -131,15 +137,21 @@ if __name__ == '__main__':
             # plot_slices(down_img_slice, mod_soft_gt_slice, show = True, save_path=f"{eval_dir}/{suffix}_img.png", gt_slice=down_soft_gt_slice)
 
             # ### PRINT IMAGES FOR TESTING ####
+            # %%
+            og_hard_gt_vol = og_hard_gt.count_nonzero()       # just sum all ones
+            ds_soft_gt_vol = ds_soft_gt.sum()                  # sum all float values (only foreground channel loaded)
+            rebin_hard_gt_vol = rebin_hard_gt.count_nonzero() 
 
-            og_hard_gt_vol = og_hard_gt.sum()     # just sum all ones
-            ds_soft_gt_vol = ds_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
-            rebin_hard_gt_vol = rebin_hard_gt.sum()
+            # print(f"og_hard_gt_vol {og_hard_gt_vol}, downscaled:{og_hard_gt_vol/scaling_factor} ")
+            # print(f"ds_soft_gt_vol {ds_soft_gt_vol}, upscaled: {ds_soft_gt_vol*scaling_factor}")
+            # print(f"rebin_hard_gt_vol {rebin_hard_gt_vol}, upscaled: {rebin_hard_gt_vol*scaling_factor}")
 
-
-            avd_ds_soft_og_hard, rvd_ds_soft_og_hard = avd_rvd(ds_soft_gt_vol*2, og_hard_gt_vol)
-            avd_rebin_hard_og_hard, rvd_rebin_hard_og_hard = avd_rvd(rebin_hard_gt_vol*2, og_hard_gt_vol)
-
+            # %%
+            avd_ds_soft_og_hard, rvd_ds_soft_og_hard = avd_rvd(ds_soft_gt_vol*scaling_factor, og_hard_gt_vol)
+            avd_rebin_hard_og_hard, rvd_rebin_hard_og_hard = avd_rvd(rebin_hard_gt_vol*scaling_factor, og_hard_gt_vol)
+        
+            
+            # %%
             data = {
             "subject_name": og_subject,
             "avd_ds_soft_og_hard": avd_ds_soft_og_hard.item(),
@@ -150,6 +162,7 @@ if __name__ == '__main__':
 
             # Write the row for the current subject
             writer.writerow(data)
+
 
     compute_metrics_summary(output_file, eval_dir, suffix)
 
