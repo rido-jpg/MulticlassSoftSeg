@@ -138,7 +138,7 @@ if __name__ == '__main__':
 
             # ### PRINT IMAGES FOR TESTING ####
             # %%
-            og_hard_gt_vol = og_hard_gt.count_nonzero()       # just sum all ones
+            og_hard_gt_vol = og_hard_gt.count_nonzero()       # count all non-zero values (as there are 1,2 and 3s)
             ds_soft_gt_vol = ds_soft_gt.sum()                  # sum all float values (only foreground channel loaded)
             rebin_hard_gt_vol = rebin_hard_gt.count_nonzero() 
 
