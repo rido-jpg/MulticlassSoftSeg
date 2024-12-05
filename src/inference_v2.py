@@ -232,8 +232,8 @@ if __name__ == '__main__':
             if conf.activation == 'linear':
                 probs = logits
 
-            if postprocessing:
-                    probs = postprocessing(probs, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+            if postprocess:
+                probs = postprocessing(probs, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
             preds = torch.argmax(probs, dim=1) # get class with highest probability
             preds_cpu = preds.cpu() # move tensor to cpu
