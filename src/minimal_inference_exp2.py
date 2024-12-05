@@ -220,17 +220,13 @@ if __name__ == '__main__':
         probs_cpu = probs.cpu() # move tensor to cpu            
         del probs
 
-        print(f"probs_cpu.shape: {probs_cpu.shape}")
 
         soft_pred_foreground = probs_cpu[:,1]
         soft_pred_padded = resize(soft_pred_foreground)
 
-        print(f"soft_pred_padded.shape: {soft_pred_padded.shape}")
 
         soft_pred_arr = soft_pred_padded.squeeze(0).numpy()
 
-        print(f"sample_nii.shape: {sample_nii.shape}")
-        print(f"soft_pred_arr.shape: {soft_pred_arr.shape}")
 
         nii_soft_pred : NII = sample_nii.set_array(soft_pred_arr)
         nii_soft_pred.save(save_path.joinpath(f"{subject}-{suffix}-foreground-soft_pred.nii.gz"))
