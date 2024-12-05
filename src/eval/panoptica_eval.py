@@ -58,10 +58,10 @@ def _get_gt_paths(gt_dir : Path) -> list:
     return gt_paths
 
 def _proc(evaluator, pred: Path, gt: Path, binarize_gt:bool = False):
-    pred_arr = NII.load(pred, True).get_seg_array()
+    pred_arr = NII.load(pred, True).get_array()
     if binarize_gt:
-        soft_gt_arr = NII.load(gt, False).get_seg_array()
-        gt_arr = np.argmax(soft_gt_arr, dim=0) # get class with highest soft score
+        soft_gt_arr = NII.load(gt, False).get_array()   # only foreground channel
+        gt_arr = (soft_gt_arr >= 0.5).type(np.uint8)    # binarize by rounding
     else:
         gt_arr = NII.load(gt, True).get_seg_array()
     if _extract_brats_id(str(pred)) != _extract_brats_id(str(gt)):
