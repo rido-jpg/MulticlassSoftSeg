@@ -120,7 +120,7 @@ def parse_inf_param(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     
-    parser.add_argument("-setup_dir", type=str, default = None, help="Path to a model log folder using the soft GTs you want to evaluate. Script will automatically obtain the path of the best cpkt (best DiceFG)")
+    parser.add_argument("-pred_dir", type=str, default = None, help="Path to a bids type folder structure containing the soft predictions.")
     #parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test", help="Path to the data directory")
     parser.add_argument("-eval_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval", help="Path to the directory where the eval.tsv should be saved")
     
@@ -128,11 +128,6 @@ def parse_inf_param(parser=None):
 
     parser.add_argument("-postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
     parser.add_argument("-smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
-
-    parser.add_argument("-postprocess_gt", action="store_true", help = "In case you want to apply the same postprocessing, to the model outputs and soft ground truths")
-
-    parser.add_argument("-only_vol", action="store_true", help= "only calc avd and rvd and nothing else")
-    parser.add_argument("-only_mse", action="store_true", help= "only calc mse, mae and derivatives")
 
     parser.add_argument("-binarize_soft_gt", action="store_true", help = "compares binarized_soft_gt")
 
@@ -149,36 +144,19 @@ if __name__ == '__main__':
     conf = parser.parse_args()
 
     eval_dir : Path = Path(conf.eval_dir)
-    #data_dir : Path = Path(conf.data_dir)
-    setup_path : Path = Path(conf.setup_dir)
+    pred_path : Path = Path(conf.pred_dir)
 
     suffix = conf.suffix
 
-    data_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
-    og_hard_gt_list = _get_gt_paths(data_dir)
+    og_hard_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
+    scaling_factor = 2*2*2
+
+    og_hard_gt_list = _get_gt_paths(og_hard_dir)
 
     soft_ds_gt_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test_ds")
     soft_ds_gt_list = _get_gt_paths(soft_ds_gt_dir)
 
-    # data_dir : Path = Path("data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test")
-    # eval_dir : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval")
-    # setup_path : Path = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v4_lr0.0001_soft_1.0_mse_1.0_down_factor_2_sigma_0.125_binary_linear_exp_3_mse_sigma_0.125")
-    #ref_path :Path = ("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/logs/lightning_logs/brats/exp_2/3D_UNet/3D_UNet_v1_lr0.0001_ce_1.0_hard_1.0_soft_dice_1.0_down_factor_2_sigma_0.5_binary_softmax_exp2_and_3_baseline")
-    # suffix = "test"
-
-    comp_ckpt_path = get_best_checkpoint(setup_path)
-    print(f"Best checkpoint: {comp_ckpt_path.name}")
-        
-    # try if torch.load works, otherwise raise an error and exit
-    try:
-        checkpoint = torch.load(comp_ckpt_path)
-    except Exception as e:
-        print(f"Error: Invalid checkpoint path or file not found: {comp_ckpt_path}")
-        sys.exit(1)
-
-    # load hparams from checkpoint to get contrast
-    hparams_comp = LitUNetModule.load_from_checkpoint(comp_ckpt_path).hparams
-    comp_train_opt = hparams_comp.get('opt')
+    preds_soft_list = _get_gt_paths(pred_path)
 
     ###### CREATING TSV FOR SAVING THE SOFT METRICS
     output_file = os.path.join(eval_dir, f"{suffix}_comparison.tsv")
@@ -190,40 +168,34 @@ if __name__ == '__main__':
     "fmse_soft", "fmae_soft",
     "avd_og_hard", "rvd_og_hard", 
     ]
-
-    # create BidsDataset instance
-    bids_test_comp_ds = BidsDataset(comp_train_opt, data_dir)
-
-    print(f"Soft GT to be compared: {comp_train_opt.experiment}")
-    print(f"Sigma of compared soft GT: {comp_train_opt.sigma}")
-
     # Open the .tsv file for writing
     with open(output_file, mode='w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=columns, delimiter='\t')
         writer.writeheader()  # Write the header row
 
-        for idx, dict in enumerate(zip(og_hard_gt_list,soft_ds_gt_list,bids_test_comp_ds)):
-            og_hard_gt_path = dict[0]
-            soft_gt_path = dict[1]
-            mod_dict = dict[2]
+        for idx, entry in enumerate(zip(og_hard_gt_list,soft_ds_gt_list,preds_soft_list)):
+            og_hard_gt_path = entry[0]
+            soft_gt_path = entry[1]
+            pred_soft_path = entry[2]
             
             og_subject = _extract_brats_id(str(og_hard_gt_path))
             soft_subject = _extract_brats_id(str(soft_gt_path))
-            mod_subject = bids_test_comp_ds.bids_list[idx]['subject']
+            preds_soft_subject = _extract_brats_id(str(pred_soft_path))
 
-            assert og_subject == mod_subject == soft_subject, f"og_subject: {og_subject} should be equal to soft_subject: {soft_subject} and mod_subject: {mod_subject}"
+            assert og_subject == preds_soft_subject == soft_subject, f"og_subject: {og_subject} should be equal to soft_subject: {soft_subject} and mod_subject: {mod_subject}"
 
             print(f"---------------------------------")
             print(f"Subject: {og_subject}")
 
-            og_hard_gt_arr = NII.load(og_hard_gt_path, True).get_seg_array()       # shape [1, 80, 96, 72]
+            og_hard_gt_arr = NII.load(og_hard_gt_path, True).get_array()       # shape [1, 80, 96, 72]
             og_hard_gt = torch.from_numpy(og_hard_gt_arr)
-            ds_soft_gt_arr = NII.load(soft_gt_path, False).get_seg_array()
+
+            ds_soft_gt_arr = NII.load(soft_gt_path, False).get_array()
             ds_soft_gt = torch.from_numpy(ds_soft_gt_arr) #shape [2, 80, 96, 72]
             
-            mod_soft_gt = mod_dict['soft_seg']
+            pred_soft_arr = NII.load(pred_soft_path, False).get_array
+            pred_soft = torch.from_numpy(pred_soft_arr)
 
-            print(f"mod_soft_gt.shape:{mod_soft_gt}")
             # ### PRINT IMAGES FOR TESTING ####
 
             # down_img = down_dict['img'][0]
@@ -236,24 +208,22 @@ if __name__ == '__main__':
 
             # ### PRINT IMAGES FOR TESTING ####
 
-
             if conf.postprocessing:
-                mod_soft_gt = postprocessing(mod_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+                pred_soft = postprocessing(pred_soft, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
-            if conf.postprocess_gt:
-                ds_soft_gt = postprocessing(ds_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
+            og_hard_gt_vol = og_hard_gt.count_nonzero()       # count all non-zero values (as there are 1,2 and 3s)
 
-            og_hard_gt_vol = og_hard_gt.sum()     # just sum all ones
+            ds_soft_gt_vol = ds_soft_gt.sum()                  # sum all float values (only foreground channel loaded)
 
-            mod_soft_gt_vol = mod_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
+            pred_soft_vol = pred_soft.sum()     # sum all float values (only foreground channel loaded)
 
-            # avd_ds_soft, rvd_ds_soft = avd_rvd(mod_soft_gt_vol, ds_soft_gt_vol)
-            avd_og_hard, rvd_og_hard = avd_rvd(mod_soft_gt_vol*2, og_hard_gt_vol)   # difference between gaussian created soft gt and original hard gt volume
-            mse_soft = mF.mean_squared_error(mod_soft_gt[1], ds_soft_gt[1])
-            mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ds_soft_gt[1])
+            avd_og_hard, rvd_og_hard = avd_rvd(pred_soft_vol * scaling_factor, og_hard_gt_vol)   # vol difference between soft prediction and original hard gt volume
 
-            img_area = mod_soft_gt[1].view(-1).shape[0]
-            fore_mask = (mod_soft_gt[1] > 0) & (ds_soft_gt[1] > 0)
+            mse_soft = mF.mean_squared_error(pred_soft, ds_soft_gt)
+            mae_soft = mF.mean_absolute_error(pred_soft, ds_soft_gt)
+
+            img_area = pred_soft.view(-1).shape[0]
+            fore_mask = (pred_soft > 0) & (ds_soft_gt > 0)
             fore_area = torch.count_nonzero(fore_mask)
             fmse_soft = mse_soft*img_area/fore_area
             fmae_soft = mae_soft*img_area/fore_area
