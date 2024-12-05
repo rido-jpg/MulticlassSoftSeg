@@ -175,9 +175,10 @@ class BidsDataset(Dataset):
             down_img = block_reduce(np.array(data_dict[self.img_key]), block_size= (1, self.ds_factor, self.ds_factor, self.ds_factor), func = np.mean)
             down_gt = block_reduce(np.array(oh_gt), block_size=(1, self.ds_factor, self.ds_factor, self.ds_factor) ,func = np.mean)
 
-            img_tensor = torch.tensor(down_img).float()
-            soft_gt_tensor = torch.tensor(down_gt).float()
-            gt_tensor = torch.argmax(soft_gt_tensor, dim=0).unsqueeze(0)    # rebinarizing the soft GT to a hard GT
+            img_tensor = torch.tensor(down_img).type(torch.float)
+            soft_gt_tensor = torch.tensor(down_gt).type(torch.float)
+            #gt_tensor = torch.argmax(soft_gt_tensor, dim=0).unsqueeze(0)        # rebinarizing the soft GT to a hard GT
+            gt_tensor = (soft_gt_tensor[1]>=0.5).type(torch.long).unsqueeze(0) # rebinarizing the soft GT to a hard GT by rounding all foreground values >= 0.5)
 
             if self.opt.experiment == 3:
                 oh_gt = F.one_hot(gt_tensor.squeeze(0), num_classes=self.n_classes).permute(3,0,1,2)
