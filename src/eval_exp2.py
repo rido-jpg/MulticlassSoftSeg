@@ -31,6 +31,11 @@ def _get_gt_paths(gt_dir : Path) -> list:
     gt_paths = list(gt_dir.rglob("*seg.nii.gz"))
     return gt_paths
 
+def _get_soft_pred_paths(gt_dir : Path) -> list:
+    gt_dir : Path = Path(gt_dir)
+    gt_paths = list(gt_dir.rglob("*soft_pred.nii.gz"))
+    return gt_paths
+
 def _extract_brats_id(filename):
     # Define the regular expression pattern to match BraTS-GLI-XXXXXX-XXX
     pattern = r"(BraTS-GLI-\d{5}-\d{3})"
@@ -156,7 +161,7 @@ if __name__ == '__main__':
     soft_ds_gt_dir = Path("/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/test_ds")
     soft_ds_gt_list = _get_gt_paths(soft_ds_gt_dir)
 
-    preds_soft_list = _get_gt_paths(pred_path)
+    preds_soft_list = _get_soft_pred_paths(pred_path)
 
     ###### CREATING TSV FOR SAVING THE SOFT METRICS
     output_file = os.path.join(eval_dir, f"{suffix}_comparison.tsv")
