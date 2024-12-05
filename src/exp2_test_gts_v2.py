@@ -182,30 +182,14 @@ if __name__ == '__main__':
 
     ###### CREATING TSV FOR SAVING THE SOFT METRICS
     output_file = os.path.join(eval_dir, f"{suffix}_comparison.tsv")
-    
-    if conf.only_vol:
-        # Define the column names
-        columns = [
-        "subject_name", 
-        # "avd_soft", "rvd_soft", 
-        "avd_og_hard", "rvd_og_hard", 
-        ]
-    elif conf.only_mse:
-        # Define the column names
-        columns = [
-        "subject_name", 
-        "mse_soft", "mae_soft",
-        "fmse_soft", "fmae_soft"
-        ]
-    else:
-        # Define the column names
-        columns = [
-        "subject_name", 
-        "mse_soft", "mae_soft",
-        "fmse_soft", "fmae_soft",
-        "avd_og_hard", "rvd_og_hard", 
-        ]
 
+    # Define the column names
+    columns = [
+    "subject_name", 
+    "mse_soft", "mae_soft",
+    "fmse_soft", "fmae_soft",
+    "avd_og_hard", "rvd_og_hard", 
+    ]
 
     # create BidsDataset instance
     bids_test_comp_ds = BidsDataset(comp_train_opt, data_dir)
@@ -236,23 +220,10 @@ if __name__ == '__main__':
             og_hard_gt = torch.from_numpy(og_hard_gt_arr)
             ds_soft_gt_arr = NII.load(soft_gt_path, False).get_seg_array()
             ds_soft_gt = torch.from_numpy(ds_soft_gt_arr) #shape [2, 80, 96, 72]
-
-            rebin_hard_gt = torch.argmax(ds_soft_gt, dim = 0)
-
-            print(f"og_hard_gt.shape: {og_hard_gt.shape}")
-            print(f"ds_soft_gt.shape: {ds_soft_gt.shape}")
-            print(f"rebin_hard_gt.shape: {rebin_hard_gt.shape}")
-
             
             mod_soft_gt = mod_dict['soft_seg']
 
             print(f"mod_soft_gt.shape:{mod_soft_gt}")
-
-            break
-
-            if conf.binarize_soft_gt:
-                mod_soft_gt = torch.argmax(mod_soft_gt, dim = 0)
-
             # ### PRINT IMAGES FOR TESTING ####
 
             # down_img = down_dict['img'][0]
@@ -272,63 +243,30 @@ if __name__ == '__main__':
             if conf.postprocess_gt:
                 ds_soft_gt = postprocessing(ds_soft_gt, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
-            if not conf.only_mse:
-                og_hard_gt_vol = og_hard_gt.sum()     # just sum all ones
-                ds_soft_gt_vol = ds_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
+            og_hard_gt_vol = og_hard_gt.sum()     # just sum all ones
 
-                mod_soft_gt_vol = mod_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
+            mod_soft_gt_vol = mod_soft_gt[1].sum() # sum all float values along the foreground dimension (channel 1)
 
-            if conf.only_vol:
-                # avd_ds_soft, rvd_ds_soft = avd_rvd(mod_soft_gt_vol, ds_soft_gt_vol)
-                avd_og_hard, rvd_og_hard = avd_rvd(mod_soft_gt_vol*2, og_hard_gt_vol)   # difference between gaussian created soft gt and original hard gt volume
+            # avd_ds_soft, rvd_ds_soft = avd_rvd(mod_soft_gt_vol, ds_soft_gt_vol)
+            avd_og_hard, rvd_og_hard = avd_rvd(mod_soft_gt_vol*2, og_hard_gt_vol)   # difference between gaussian created soft gt and original hard gt volume
+            mse_soft = mF.mean_squared_error(mod_soft_gt[1], ds_soft_gt[1])
+            mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ds_soft_gt[1])
 
-                data = {
+            img_area = mod_soft_gt[1].view(-1).shape[0]
+            fore_mask = (mod_soft_gt[1] > 0) & (ds_soft_gt[1] > 0)
+            fore_area = torch.count_nonzero(fore_mask)
+            fmse_soft = mse_soft*img_area/fore_area
+            fmae_soft = mae_soft*img_area/fore_area
+
+            data = {
                 "subject_name": og_subject,
-                # "avd_ds_soft": avd_ds_soft.item(),
-                # "rvd_ds_soft": rvd_ds_soft.item(),
+                "mse_soft": mse_soft.item(),
+                "mae_soft": mae_soft.item(),
+                "fmse_soft": fmse_soft.item(),
+                "fmae_soft": fmae_soft.item(),
                 "avd_og_hard": avd_og_hard.item(),
                 "rvd_og_hard": rvd_og_hard.item(),
             }
-            elif conf.only_mse:
-                mse_soft = mF.mean_squared_error(mod_soft_gt[1], ds_soft_gt[1])
-                mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ds_soft_gt[1])
-
-                img_area = mod_soft_gt[1].view(-1).shape[0]
-                fore_mask = (mod_soft_gt[1] > 0) & (ds_soft_gt[1] > 0)
-                fore_area = torch.count_nonzero(fore_mask)
-
-                fmse_soft = mse_soft*img_area/fore_area
-                fmae_soft = mae_soft*img_area/fore_area
-
-
-                data = {
-                    "subject_name": og_subject,
-                    "mse_soft": mse_soft.item(),
-                    "mae_soft": mae_soft.item(),
-                    "fmse_soft": fmse_soft.item(),
-                    "fmae_soft": fmae_soft.item(),
-                }
-            else:
-                # avd_ds_soft, rvd_ds_soft = avd_rvd(mod_soft_gt_vol, ds_soft_gt_vol)
-                avd_og_hard, rvd_og_hard = avd_rvd(mod_soft_gt_vol*2, og_hard_gt_vol)   # difference between gaussian created soft gt and original hard gt volume
-                mse_soft = mF.mean_squared_error(mod_soft_gt[1], ds_soft_gt[1])
-                mae_soft = mF.mean_absolute_error(mod_soft_gt[1], ds_soft_gt[1])
-
-                img_area = mod_soft_gt[1].view(-1).shape[0]
-                fore_mask = (mod_soft_gt[1] > 0) & (ds_soft_gt[1] > 0)
-                fore_area = torch.count_nonzero(fore_mask)
-                fmse_soft = mse_soft*img_area/fore_area
-                fmae_soft = mae_soft*img_area/fore_area
-
-                data = {
-                    "subject_name": og_subject,
-                    "mse_soft": mse_soft.item(),
-                    "mae_soft": mae_soft.item(),
-                    "fmse_soft": fmse_soft.item(),
-                    "fmae_soft": fmae_soft.item(),
-                    "avd_og_hard": avd_og_hard.item(),
-                    "rvd_og_hard": rvd_og_hard.item(),
-                }
 
             # Write the row for the current subject
             writer.writerow(data)
