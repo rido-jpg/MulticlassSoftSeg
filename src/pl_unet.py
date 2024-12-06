@@ -395,7 +395,7 @@ class LitUNetModule(pl.LightningModule):
             probs = logits
 
         if self.binary:
-            preds = (probs[:, 1, :, :, :] >= 0.5 ).type(torch.uint8)   # getting the class with the highest probability for binary case to avoid ties or prefential treatment of channel 0
+            preds = (probs[:, 1] >= 0.5 ).type(torch.long)   # getting the class with the highest probability for binary case to avoid ties or prefential treatment of channel 0
         else:
             preds = torch.argmax(probs, dim=1)   # getting the class with the highest probability -> argmax not differentiable
         del probs
