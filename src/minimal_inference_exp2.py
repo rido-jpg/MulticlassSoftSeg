@@ -194,6 +194,10 @@ if __name__ == '__main__':
         #base_path : Path = ds_data_dir / subject 
         save_path : Path = save_dir / model_name / subject
 
+        #check if path exists, if not, create it
+        if not save_path.exists():
+            save_path.mkdir(parents=True)
+
         # add batch dimension, in this case 1 because our batch size is 1
         img_tensor = img.unsqueeze(0)
 
