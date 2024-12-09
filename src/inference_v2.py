@@ -70,7 +70,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "fnio", help="Format of the data (fnio or nii.gz)")
-    parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu", "linear"], help="Activation function for output layer")
+    parser.add_argument("-activation", type=str, default = "linear", choices=["softmax", "relu", "linear"], help="Activation function for output layer")
     parser.add_argument("-round", type=int, default = None, help="Round all probability maps to the given number of decimals")
     parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices. Annotation is made in Axial Slices. Hence Coronal and Sagittal slices should show hard edges in GT.")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to predict. If 0, predict all samples in the dataset")

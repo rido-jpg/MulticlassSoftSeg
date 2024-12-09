@@ -62,13 +62,13 @@ def parse_inf_param(parser=None):
     
     parser.add_argument("-model_dir", type=str, default = None, help="Path to the model log folder. Script will automatically obtain the path of the best cpkt (best DiceFG)")
     #parser.add_argument("-data_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/val", help="Path to the data directory")
-    parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds", help="Path to the directory where the predictions should be saved")
+    parser.add_argument("-save_dir", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/data/external/ASNR-MICCAI-BraTS2023-GLI-Challenge/preds_ds", help="Path to the directory where the predictions should be saved")
 
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
 
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-format", type=str, default = "nii.gz", help="Format of the data (fnio or nii.gz)")
-    parser.add_argument("-activation", type=str, default = "softmax", choices=["softmax", "relu", "linear"], help="Activation function for output layer")
+    parser.add_argument("-activation", type=str, default = "linear", choices=["softmax", "relu", "linear"], help="Activation function for output layer")
 
     parser.add_argument("-axis", type=str, default= "axial", choices=["axial", "sagittal", "coronal"], help="Axis to plot the slices. Annotation is made in Axial Slices. Hence Coronal and Sagittal slices should show hard edges in GT.")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to predict. If 0, predict all samples in the dataset")
