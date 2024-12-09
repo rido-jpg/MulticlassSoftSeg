@@ -220,7 +220,6 @@ if __name__ == '__main__':
             if postprocess:
                     probs = postprocessing(probs, 3, smooth)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
-
         probs_cpu = probs.cpu() # move tensor to cpu            
         del probs
 
@@ -229,7 +228,7 @@ if __name__ == '__main__':
         soft_pred_padded = resize(soft_pred_foreground)
 
 
-        soft_pred_arr = soft_pred_padded.squeeze(0).numpy()
+        soft_pred_arr = soft_pred_padded.squeeze(0).numpy().astype(np.float32)
 
 
         nii_soft_pred : NII = sample_nii.set_array(soft_pred_arr)
