@@ -34,7 +34,7 @@ def parse_inf_param(parser=None):
     parser.add_argument("-test_loop", action='store_true', help="Run test loop with single sample for debugging")
     parser.add_argument("-samples", type=int, default = 0, help="Number of samples to evaluate. If 0, evaluate all predictions")
     parser.add_argument("-config", type=str, default = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/panoptica_evaluator_BRATS.yaml", help="Name of the configuration file to use for the evaluation")
-    parser.add_argument("-exp2", action='store_true', help = "For experiment 2, load soft GTs and binarize them on the fly")
+    parser.add_argument("-exp2", action='store_true', help = "For experiment 2 (and 3), load soft GTs and binarize them on the fly")
 
     return parser
 
@@ -58,12 +58,17 @@ def _get_gt_paths(gt_dir : Path) -> list:
     return gt_paths
 
 def _proc(evaluator, pred: Path, gt: Path, binarize_gt:bool = False):
-    pred_arr = NII.load(pred, True).get_array()
     if binarize_gt:
+        soft_pred_arr = NII.load(pred, False).get_array()   # only foreground channel
+        pred_arr = (soft_pred_arr >= 0.5).astype(np.uint8)    # binarize by rounding
+
         soft_gt_arr = NII.load(gt, False).get_array()   # only foreground channel
-        gt_arr = (soft_gt_arr >= 0.5).type(np.uint8)    # binarize by rounding
+        gt_arr = (soft_gt_arr >= 0.5).astype(np.uint8)    # binarize by rounding
+
     else:
+        pred_arr = NII.load(pred, True).get_array()
         gt_arr = NII.load(gt, True).get_seg_array()
+        
     if _extract_brats_id(str(pred)) != _extract_brats_id(str(gt)):
         # throw assertion error
         raise Exception(f"The prediction and ground truth do not match. Prediction subject: {_extract_brats_id(str(pred))}, Ground truth subject: {_extract_brats_id(str(gt))}")
@@ -103,7 +108,11 @@ if __name__ == "__main__":
     preds_dir : Path = Path(conf.preds_dir)
     gt_dir : Path = Path(conf.gt_dir)
     save_dir : Path = Path(conf.save_dir)
-    config = conf.config
+
+    if conf.exp2:
+        config = "/home/student/farid_ma/dev/multiclass_softseg/MulticlassSoftSeg/src/eval/panoptica_evaluator_exp2.yaml"   #config file for experiment 2 -> only binary 
+    else:
+        config = conf.config
     samples = conf.samples
 
     if conf.test_loop:
