@@ -131,8 +131,8 @@ def parse_inf_param(parser=None):
     
     parser.add_argument("-suffix", type=str, default = None, help="Suffix for saved predictions")
 
-    parser.add_argument("-postprocessing", action="store_true", help = "In case you don't want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
-    parser.add_argument("-smoothing", action="store_true", help = "In case you want to postprocess the output of the model, but not smooth values below 0.05 and above 0.95.")
+    parser.add_argument("-postprocessing", action="store_true", help = "In case you want to postprocess the outputs of the models, by rounding to 3 decimals and smoothing values below 0.05 and above 0.95.")
+    parser.add_argument("-smoothing", action="store_true", help = "In case you want to smooth values below 0.05 and above 0.95 as part of postprocessing. Only works if -postprocessing is also activated")
 
     parser.add_argument("-binarize_soft_gt", action="store_true", help = "compares binarized_soft_gt")
 
@@ -147,6 +147,9 @@ if __name__ == '__main__':
 
     parser = parse_inf_param()
     conf = parser.parse_args()
+
+    if conf.postprocessing == False and conf.smoothing == True:
+        sys.exit("If you want to smooth the output, you also need to pass -postprocessing as a parameter")
 
     eval_dir : Path = Path(conf.eval_dir)
     pred_path : Path = Path(conf.pred_dir)
@@ -198,7 +201,7 @@ if __name__ == '__main__':
             ds_soft_gt_arr = NII.load(soft_gt_path, False).get_array()
             ds_soft_gt = torch.from_numpy(ds_soft_gt_arr) #shape [2, 80, 96, 72]
             
-            pred_soft_arr = NII.load(pred_soft_path, False).get_array
+            pred_soft_arr = NII.load(pred_soft_path, False).get_array()
             pred_soft = torch.from_numpy(pred_soft_arr)
 
             # ### PRINT IMAGES FOR TESTING ####
@@ -216,7 +219,7 @@ if __name__ == '__main__':
             if conf.postprocessing:
                 pred_soft = postprocessing(pred_soft, 3, conf.smoothing)    # kills all values < 0, rounds to 3 decimals and smoothes values below 0 and above 0.95
 
-            og_hard_gt_vol = og_hard_gt.count_nonzero()       # count all non-zero values (as there are 1,2 and 3s)
+            og_hard_gt_vol = og_hard_gt.to(torch.uint8).count_nonzero()       # count all non-zero values (as there are 1,2 and 3s)
 
             ds_soft_gt_vol = ds_soft_gt.sum()                  # sum all float values (only foreground channel loaded)
 
@@ -228,7 +231,7 @@ if __name__ == '__main__':
             mae_soft = mF.mean_absolute_error(pred_soft, ds_soft_gt)
 
             img_area = pred_soft.view(-1).shape[0]
-            fore_mask = (pred_soft > 0) & (ds_soft_gt > 0)
+            fore_mask = ((pred_soft > 0) & (ds_soft_gt > 0)).to(torch.uint8)
             fore_area = torch.count_nonzero(fore_mask)
             fmse_soft = mse_soft*img_area/fore_area
             fmae_soft = mae_soft*img_area/fore_area
