@@ -111,6 +111,7 @@ unet/out*/
 *.png
 *.csv
 *.tsv
+src/logs/*
 
 # track the data directory inside the src directory
 !/src/data/
