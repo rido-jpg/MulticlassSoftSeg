@@ -1,6 +1,6 @@
 # MulticlassSoftSeg
 
-Extending the approach explained in the [SoftSeg paper](https://arxiv.org/pdf/2011.09041.pdf) to a 3D multi-class segmentation scenario, as part of my master's thesis.
+Extending the approach explained in the [SoftSeg paper](https://arxiv.org/pdf/2011.09041.pdf) to a 3D multi-class segmentation scenario, as part of my master's thesis at the chair of AI in Medicine at the Technical University of Munich.
 
 Citing from the abstract of my thesis:
 
